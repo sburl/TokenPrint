@@ -34,10 +34,10 @@ ELECTRICITY_COST_KWH = 0.13  # USD per kWh (EIA commercial average)
 
 
 def run_command(cmd, timeout=60):
-    """Run a shell command and return stdout, or None on failure."""
+    """Run a command (list of args) and return stdout, or None on failure."""
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout
+            cmd, capture_output=True, text=True, timeout=timeout
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -48,10 +48,10 @@ def run_command(cmd, timeout=60):
 
 def detect_github_username():
     """Detect GitHub username from gh CLI or git config, prompt if neither available."""
-    username = run_command("gh api user --jq .login", timeout=5)
+    username = run_command(["gh", "api", "user", "--jq", ".login"], timeout=5)
     if username:
         return username
-    username = run_command("git config user.name", timeout=5)
+    username = run_command(["git", "config", "user.name"], timeout=5)
     if username:
         return username
     try:
@@ -65,11 +65,11 @@ def detect_github_username():
 
 def collect_claude_data(since=None, until=None):
     """Collect Claude Code usage via ccusage."""
-    cmd = "ccusage daily --json"
+    cmd = ["ccusage", "daily", "--json"]
     if since:
-        cmd += f" --since {since}"
+        cmd.extend(["--since", since])
     if until:
-        cmd += f" --until {until}"
+        cmd.extend(["--until", until])
 
     output = run_command(cmd, timeout=120)
     if not output:
@@ -117,11 +117,11 @@ def _parse_date_flexible(date_str):
 
 def collect_codex_data(since=None, until=None):
     """Collect Codex CLI usage via @ccusage/codex."""
-    cmd = "npx @ccusage/codex@latest daily --json"
+    cmd = ["npx", "@ccusage/codex@latest", "daily", "--json"]
     if since:
-        cmd += f" --since {since}"
+        cmd.extend(["--since", since])
     if until:
-        cmd += f" --until {until}"
+        cmd.extend(["--until", until])
 
     output = run_command(cmd, timeout=60)
     if not output:
@@ -185,7 +185,7 @@ def collect_gemini_data(since=None, until=None):
     log_path = Path.home() / ".gemini" / "telemetry.log"
     if not log_path.exists():
         print("  [skip] Gemini telemetry log not found (~/.gemini/telemetry.log)", file=sys.stderr)
-        print("         Run scripts/setup-gemini-telemetry.sh to enable", file=sys.stderr)
+        print("         Run: bash install.sh (or bash setup-gemini-telemetry.sh)", file=sys.stderr)
         return {}
 
     daily = defaultdict(lambda: {
@@ -676,7 +676,7 @@ def generate_html(data, output_path):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TokenPrint</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90' style='filter:grayscale(1) brightness(10)'>⚡</text></svg>">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" integrity="sha384-T/4KgSWuZEPozpPz7rnnp/5lDSnpY1VPJCojf1S81uTHS1E38qgLfMgVsAeRCWc4" crossorigin="anonymous"></script>
 <style>
   :root {{
     --bg: #0f172a; --surface: #1e293b; --border: #334155;
@@ -950,7 +950,7 @@ def generate_html(data, output_path):
 
 <script>
 const dates = {dates_json};
-const GITHUB_USER = '{github_username}';
+const GITHUB_USER = {json.dumps(github_username)};
 // Carbon equivalents for energy tooltip
 const dailyCarbonG = {daily_carbon_json};
 const carbonDivisor = {carbon_divisor};
@@ -1858,12 +1858,18 @@ function showSharePreview(canvas) {{
 
 
 def main():
+    import re
     parser = argparse.ArgumentParser(description="Generate AI usage & impact dashboard")
     parser.add_argument("--since", help="Start date (YYYYMMDD)")
     parser.add_argument("--until", help="End date (YYYYMMDD)")
     parser.add_argument("--no-open", action="store_true", help="Don't open in browser")
     parser.add_argument("--output", help="Output HTML path")
     args = parser.parse_args()
+
+    # Validate date arguments
+    for name, val in [("since", args.since), ("until", args.until)]:
+        if val and not re.match(r"^\d{8}$", val):
+            parser.error(f"--{name} must be YYYYMMDD format (got: {val})")
 
     print("Collecting AI usage data...")
 

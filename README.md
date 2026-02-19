@@ -9,14 +9,14 @@ TokenPrint collects usage data from **Claude Code**, **Codex CLI**, and **Gemini
 ## Quick Start
 
 ```bash
-# Prerequisites
-npm i -g ccusage          # Claude Code usage data
+# One-command setup (installs ccusage, codex, gemini telemetry)
+bash install.sh
 
 # Run
 python3 tokenprint.py     # Opens dashboard in browser
 ```
 
-That's it. Codex data works via `npx` (no install needed). Gemini is optional.
+Or install manually: `npm i -g ccusage` for Claude data. Codex works via `npx` (no install). Gemini is optional.
 
 ## What You Get
 
@@ -49,7 +49,7 @@ python3 tokenprint.py --no-open                 # Generate without opening
 python3 tokenprint.py --output ~/report.html    # Custom output path
 ```
 
-The default output is `/tmp/ai-usage-dashboard.html` — a fixed path so you can re-run and Command-R to refresh.
+The default output is `/tmp/tokenprint.html` — a fixed path so you can re-run and Command-R to refresh.
 
 ## Data Sources
 
