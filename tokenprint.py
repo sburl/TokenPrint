@@ -7,8 +7,10 @@ and Gemini CLI (OpenTelemetry logs), then generates an interactive HTML dashboar
 showing usage trends, costs, and estimated environmental impact.
 
 Usage:
-    python3 tokenprint.py [--since YYYYMMDD] [--until YYYYMMDD] [--no-open] [--output PATH]
+    tokenprint [--since YYYYMMDD] [--until YYYYMMDD] [--no-open] [--output PATH]
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -21,6 +23,7 @@ import webbrowser
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # --- Energy / Carbon Model ---
 ENERGY_PER_OUTPUT_TOKEN_WH = 0.001
@@ -34,7 +37,7 @@ WATER_USE_EFFICIENCY = 0.5    # liters per kWh
 ELECTRICITY_COST_KWH = 0.13  # USD per kWh (EIA commercial average)
 
 
-def run_command(cmd, timeout=60):
+def run_command(cmd: list[str], timeout: int = 60) -> str | None:
     """Run a command (list of args) and return stdout, or None on failure."""
     try:
         result = subprocess.run(
@@ -47,7 +50,7 @@ def run_command(cmd, timeout=60):
         return None
 
 
-def detect_github_username():
+def detect_github_username() -> str:
     """Detect GitHub username from gh CLI or git config, prompt if neither available."""
     username = run_command(["gh", "api", "user", "--jq", ".login"], timeout=5)
     if username:
@@ -64,7 +67,7 @@ def detect_github_username():
     return "dev"
 
 
-def collect_claude_data(since=None, until=None):
+def collect_claude_data(since: str | None = None, until: str | None = None) -> dict[str, dict[str, Any]]:
     """Collect Claude Code usage via ccusage."""
     cmd = ["ccusage", "daily", "--json"]
     if since:
@@ -86,7 +89,7 @@ def collect_claude_data(since=None, until=None):
     # ccusage wraps data in {"daily": [...]}
     data = raw.get("daily", raw) if isinstance(raw, dict) else raw
 
-    daily = {}
+    daily: dict[str, dict[str, Any]] = {}
     for entry in data:
         date = entry.get("date", "")
         if not date:
@@ -105,7 +108,7 @@ def collect_claude_data(since=None, until=None):
     return daily
 
 
-def _parse_date_flexible(date_str):
+def _parse_date_flexible(date_str: str | None) -> str | None:
     """Parse dates in ISO (2026-01-07) or human (Jan 7, 2026) format to YYYY-MM-DD."""
     if not date_str:
         return None
@@ -126,7 +129,7 @@ def _parse_date_flexible(date_str):
     return None
 
 
-def collect_codex_data(since=None, until=None):
+def collect_codex_data(since: str | None = None, until: str | None = None) -> dict[str, dict[str, Any]]:
     """Collect Codex CLI usage via @ccusage/codex."""
     cmd = ["npx", "@ccusage/codex@18", "daily", "--json"]
     if since:
@@ -149,7 +152,7 @@ def collect_codex_data(since=None, until=None):
     data = raw.get("daily", raw) if isinstance(raw, dict) else raw
 
     # First pass: collect all entries
-    entries = []
+    entries: list[tuple[str, int, int, int, float]] = []
     for entry in data:
         raw_date = entry.get("date", "")
         if not raw_date:
@@ -170,7 +173,7 @@ def collect_codex_data(since=None, until=None):
     rate_output = 2.76e-6   # $2.76/M output tokens
     rate_cached = 0.17e-6   # $0.17/M cached tokens
 
-    daily = {}
+    daily: dict[str, dict[str, Any]] = {}
     for date, input_tok, output_tok, cached_tok, cost in entries:
         if not cost and (input_tok or output_tok):
             cost = input_tok * rate_input + output_tok * rate_output + cached_tok * rate_cached
@@ -187,7 +190,7 @@ def collect_codex_data(since=None, until=None):
     return daily
 
 
-def collect_gemini_data(since=None, until=None):
+def collect_gemini_data(since: str | None = None, until: str | None = None) -> dict[str, dict[str, Any]]:
     """Collect Gemini CLI usage from OpenTelemetry log."""
     log_path = Path.home() / ".gemini" / "telemetry.log"
     if not log_path.exists():
@@ -195,7 +198,7 @@ def collect_gemini_data(since=None, until=None):
         print("         Run: bash install.sh (or bash setup-gemini-telemetry.sh)", file=sys.stderr)
         return {}
 
-    daily = defaultdict(lambda: {
+    daily: dict[str, dict[str, Any]] = defaultdict(lambda: {
         "provider": "gemini",
         "input_tokens": 0, "output_tokens": 0,
         "cache_read_tokens": 0, "cache_write_tokens": 0,
@@ -203,7 +206,7 @@ def collect_gemini_data(since=None, until=None):
     })
 
     try:
-        with open(log_path, "r") as f:
+        with open(log_path) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -233,7 +236,7 @@ def collect_gemini_data(since=None, until=None):
                 # Look for token usage in attributes or body
                 attrs = record.get("attributes", record.get("Attributes", {}))
                 if isinstance(attrs, list):
-                    attrs_dict = {}
+                    attrs_dict: dict[str, Any] = {}
                     for a in attrs:
                         if not isinstance(a, dict):
                             continue
@@ -261,7 +264,7 @@ def collect_gemini_data(since=None, until=None):
         return {}
 
     # Estimate Gemini costs (Gemini 2.5 Pro pricing, cached = 10% of input rate)
-    for date, d in daily.items():
+    for d in daily.values():
         input_cost = d["input_tokens"] * 1.25 / 1_000_000
         output_cost = d["output_tokens"] * 10.00 / 1_000_000
         cached_cost = d["cache_read_tokens"] * 0.125 / 1_000_000
@@ -270,7 +273,7 @@ def collect_gemini_data(since=None, until=None):
     return dict(daily)
 
 
-def _safe_int(val):
+def _safe_int(val: Any) -> int:
     """Convert a value to int safely."""
     try:
         return int(val)
@@ -278,7 +281,7 @@ def _safe_int(val):
         return 0
 
 
-def calculate_energy(tokens_input, tokens_output, tokens_cached):
+def calculate_energy(tokens_input: int, tokens_output: int, tokens_cached: int) -> float:
     """Calculate energy in Wh with PUE and grid losses."""
     base = (
         tokens_output * ENERGY_PER_OUTPUT_TOKEN_WH
@@ -288,25 +291,29 @@ def calculate_energy(tokens_input, tokens_output, tokens_cached):
     return base * PUE * GRID_LOSS_FACTOR
 
 
-def calculate_carbon(energy_wh):
+def calculate_carbon(energy_wh: float) -> float:
     """Calculate CO2 in grams from energy in Wh, including embodied carbon."""
     energy_kwh = energy_wh / 1000
     return energy_kwh * CARBON_INTENSITY * EMBODIED_CARBON_FACTOR
 
 
-def calculate_water(energy_wh):
+def calculate_water(energy_wh: float) -> float:
     """Calculate water usage in mL from energy in Wh."""
     energy_kwh = energy_wh / 1000
     return energy_kwh * WATER_USE_EFFICIENCY * 1000  # Convert L to mL
 
 
-def merge_data(claude_data, codex_data, gemini_data):
+def merge_data(
+    claude_data: dict[str, dict[str, Any]],
+    codex_data: dict[str, dict[str, Any]],
+    gemini_data: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Merge all provider data into a unified daily dataset."""
     all_dates = sorted(set(list(claude_data.keys()) + list(codex_data.keys()) + list(gemini_data.keys())))
 
     merged = []
     for date in all_dates:
-        row = {"date": date, "claude": {}, "codex": {}, "gemini": {}}
+        row: dict[str, Any] = {"date": date, "claude": {}, "codex": {}, "gemini": {}}
         for provider, data in [("claude", claude_data), ("codex", codex_data), ("gemini", gemini_data)]:
             if date in data:
                 d = data[date]
@@ -331,12 +338,12 @@ def merge_data(claude_data, codex_data, gemini_data):
     return merged
 
 
-def _json_dumps_html_safe(value):
+def _json_dumps_html_safe(value: Any) -> str:
     """json.dumps with HTML-safe escaping for embedding in <script> blocks."""
     return json.dumps(value).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
-def compute_dashboard_data(data):
+def compute_dashboard_data(data: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute the config dict that the HTML template needs."""
     github_username = detect_github_username()
 
@@ -372,10 +379,20 @@ def compute_dashboard_data(data):
         "maxDate": max_date,
         "electricityCostKwh": ELECTRICITY_COST_KWH,
         "generatedAt": datetime.now().strftime("%m/%d/%Y, %I:%M %p"),
+        "energyModel": {
+            "outputWhPerToken": ENERGY_PER_OUTPUT_TOKEN_WH,
+            "inputWhPerToken": ENERGY_PER_INPUT_TOKEN_WH,
+            "cachedWhPerToken": ENERGY_PER_CACHED_TOKEN_WH,
+            "pue": PUE,
+            "gridLossFactor": GRID_LOSS_FACTOR,
+            "carbonIntensity": CARBON_INTENSITY,
+            "embodiedCarbonFactor": EMBODIED_CARBON_FACTOR,
+            "waterUseEfficiency": WATER_USE_EFFICIENCY,
+        },
     }
 
 
-def generate_html(data, output_path):
+def generate_html(data: list[dict[str, Any]], output_path: str) -> None:
     """Generate the self-contained HTML dashboard from template."""
     config = compute_dashboard_data(data)
     config_json = _json_dumps_html_safe(config)
@@ -390,7 +407,7 @@ def generate_html(data, output_path):
         f.write(html)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Generate AI usage & impact dashboard")
     parser.add_argument("--since", help="Start date (YYYYMMDD)")
     parser.add_argument("--until", help="End date (YYYYMMDD)")
