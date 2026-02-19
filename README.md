@@ -1,0 +1,101 @@
+# TokenPrint
+
+Track the true cost of AI coding tools — tokens, dollars, energy, carbon, and water.
+
+TokenPrint collects usage data from **Claude Code**, **Codex CLI**, and **Gemini CLI**, then generates an interactive HTML dashboard with cost breakdowns, environmental impact estimates, and real-world equivalents.
+
+![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
+## Quick Start
+
+```bash
+# Prerequisites
+npm i -g ccusage          # Claude Code usage data
+
+# Run
+python3 tokenprint.py     # Opens dashboard in browser
+```
+
+That's it. Codex data works via `npx` (no install needed). Gemini is optional.
+
+## What You Get
+
+An interactive dark-mode dashboard with:
+
+- **Provider toggles** — Click Claude/Codex/Gemini to show/hide any provider across all charts, cards, and tables
+- **Date range picker** — Filter to any date range
+- **Daily + cumulative views** — Toggle each chart between daily bars and cumulative lines
+- **Cost matrix** — Monthly cost breakdown by provider with token tooltips
+- **Environmental impact cards** — Energy (Wh/kWh/MWh), carbon (g/kg/tonnes), water (mL/L), electricity cost
+- **Real-world equivalents** — Burritos, stacked Bibles, Tesla miles, showers, flights, gas car miles
+
+### Charts
+
+| Chart | Daily | Cumulative |
+|-------|-------|------------|
+| Cost | Stacked bars by provider | Line with total |
+| Tokens | Stacked bars by provider | Line with total |
+| Energy | Stacked bars by provider | Line with total |
+| Carbon | Color-coded bars (green/amber/red) | Line with total |
+
+## Usage
+
+```bash
+python3 tokenprint.py                           # Full history, opens in browser
+python3 tokenprint.py --since 20260201          # From date
+python3 tokenprint.py --until 20260215          # To date
+python3 tokenprint.py --since 20260201 --until 20260215  # Date range
+python3 tokenprint.py --no-open                 # Generate without opening
+python3 tokenprint.py --output ~/report.html    # Custom output path
+```
+
+The default output is `/tmp/ai-usage-dashboard.html` — a fixed path so you can re-run and Command-R to refresh.
+
+## Data Sources
+
+| Provider | Source | Install |
+|----------|--------|---------|
+| Claude Code | `ccusage daily --json` | `npm i -g ccusage` |
+| Codex CLI | `npx @ccusage/codex@latest daily --json` | None (runs via npx) |
+| Gemini CLI | `~/.gemini/telemetry.log` | One-time setup (see below) |
+
+### Gemini CLI Setup (Optional)
+
+Gemini CLI doesn't expose usage data by default. Run the setup script to enable OpenTelemetry local logging:
+
+```bash
+bash setup-gemini-telemetry.sh
+```
+
+This adds telemetry config to `~/.gemini/settings.json`. Future Gemini CLI sessions will log token usage to `~/.gemini/telemetry.log`. Historical data cannot be backfilled — tracking starts from the point you enable it.
+
+## Energy & Carbon Model
+
+TokenPrint estimates environmental impact using industry averages:
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Energy per output token | 0.001 Wh | Industry estimate |
+| Energy per input token | 0.0002 Wh | Industry estimate |
+| Energy per cached token | 0.00005 Wh | Industry estimate |
+| PUE (data center overhead) | 1.2x | Industry average |
+| Embodied carbon | +20% | Lifecycle estimate |
+| Grid transmission loss | 6% | US average |
+| Carbon intensity | 390 gCO2e/kWh | US grid average |
+| Water usage efficiency | 0.5 L/kWh | Industry average |
+| Electricity price | $0.12/kWh | US commercial average |
+
+These are rough estimates. Actual impact varies by model, hardware, data center location, time of day, and renewable energy mix. The dashboard includes a full methodology section with all assumptions.
+
+## CrossCheck Integration
+
+If you use [CrossCheck](https://github.com/sburl/CrossCheck), TokenPrint is available as the `/ai-impact` skill:
+
+```bash
+/ai-impact                    # Same as running tokenprint.py
+/ai-impact --since 20260201   # With date filter
+```
+
+## License
+
+MIT

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI Usage & Impact Dashboard Generator
+TokenPrint Dashboard Generator
 
 Collects token usage data from Claude Code (ccusage), Codex CLI (@ccusage/codex),
 and Gemini CLI (OpenTelemetry logs), then generates an interactive HTML dashboard
@@ -663,7 +663,7 @@ def generate_html(data, output_path):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Usage & Impact</title>
+<title>TokenPrint</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   :root {{
@@ -742,7 +742,7 @@ def generate_html(data, output_path):
 </style>
 </head>
 <body>
-<h1><span style="font-size: 1.1em; filter: grayscale(1) brightness(10);">⚡</span> AI Usage & Impact</h1>
+<h1><span style="font-size: 1.1em; filter: grayscale(1) brightness(10);">⚡</span> TokenPrint</h1>
 <p class="subtitle"><span id="dateRange">{date_range} ({len(data)} active days)</span> &middot; <span id="genTime">Last updated {datetime.now().strftime("%Y-%m-%d %H:%M")}</span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Update</button></p>
 <p class="token-summary" id="tokenSummary">{total_tokens:,} total tokens &middot; {totals['input_tokens']:,} input &middot; {totals['output_tokens']:,} output &middot; {totals['cache_read_tokens']:,} cached</p>
 
