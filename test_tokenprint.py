@@ -78,6 +78,12 @@ class TestParseDateFlexible:
     def test_empty(self):
         assert _parse_date_flexible("") is None
 
+    def test_invalid_iso_month(self):
+        assert _parse_date_flexible("2026-13-01") is None
+
+    def test_invalid_iso_day(self):
+        assert _parse_date_flexible("2026-02-30") is None
+
 
 # --- _json_dumps_html_safe ---
 
@@ -195,6 +201,16 @@ class TestMergeData:
         assert result[0]["date"] == "2026-01-10"
         assert result[1]["date"] == "2026-01-20"
 
+    def test_energy_carbon_water_values(self):
+        """Verify computed energy/carbon/water values match expectations."""
+        claude = {"2026-01-15": {"provider": "claude", "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 200, "cache_write_tokens": 0, "cost": 0.10}}
+        result = merge_data(claude, {}, {})
+        row = result[0]["claude"]
+        expected_energy = calculate_energy(1000, 500, 200)
+        assert row["energy_wh"] == pytest.approx(round(expected_energy, 4))
+        assert row["carbon_g"] == pytest.approx(round(calculate_carbon(expected_energy), 4))
+        assert row["water_ml"] == pytest.approx(round(calculate_water(expected_energy), 4))
+
 
 # --- compute_dashboard_data ---
 
@@ -253,6 +269,20 @@ class TestComputeDashboardData:
         assert config["minDate"] == ""
         assert config["maxDate"] == ""
 
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_raw_data_field_ordering(self, mock_user):
+        """Verify raw data arrays are [input, output, cached, cost] in correct order."""
+        data = merge_data(
+            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 200, "cache_read_tokens": 300, "cache_write_tokens": 0, "cost": 0.50}},
+            {}, {},
+        )
+        config = compute_dashboard_data(data)
+        c = config["rawData"][0]["c"]
+        assert c[0] == 100   # input
+        assert c[1] == 200   # output
+        assert c[2] == 300   # cached
+        assert c[3] == 0.50  # cost
+
 
 # --- collect_claude_data ---
 
@@ -274,6 +304,15 @@ class TestCollectClaudeData:
     @patch("tokenprint.run_command", return_value="not json")
     def test_invalid_json(self, mock_run):
         assert collect_claude_data() == {}
+
+    @patch("tokenprint.run_command", return_value='{"daily": [{"date": "2026-01-15", "inputTokens": 100, "outputTokens": 50, "cacheReadTokens": 10, "cacheCreationTokens": 0, "totalCost": 0.01}, {"date": "2026-01-15", "inputTokens": 200, "outputTokens": 100, "cacheReadTokens": 20, "cacheCreationTokens": 0, "totalCost": 0.02}]}')
+    def test_same_date_aggregation(self, mock_run):
+        result = collect_claude_data()
+        d = result["2026-01-15"]
+        assert d["input_tokens"] == 300
+        assert d["output_tokens"] == 150
+        assert d["cache_read_tokens"] == 30
+        assert d["cost"] == pytest.approx(0.03)
 
 
 # --- collect_codex_data ---
@@ -302,6 +341,22 @@ class TestCollectCodexData:
         d = result["2026-01-15"]
         # When costUSD is 0 but tokens exist, cost should be estimated
         assert d["cost"] > 0
+
+    @patch("tokenprint.run_command", return_value='{"daily": [{"date": "2026-01-15", "inputTokens": 100, "outputTokens": 50, "cachedInputTokens": 200, "costUSD": 0.01}]}')
+    def test_negative_cached_subtraction_clamped(self, mock_run):
+        """When cachedInputTokens > inputTokens, input_tokens should be clamped to 0."""
+        result = collect_codex_data()
+        d = result["2026-01-15"]
+        assert d["input_tokens"] == 0
+        assert d["cache_read_tokens"] == 200
+
+    @patch("tokenprint.run_command", return_value='{"daily": [{"date": "2026-01-15", "inputTokens": 100, "outputTokens": 50, "cachedInputTokens": 10, "costUSD": 0.01}, {"date": "2026-01-15", "inputTokens": 200, "outputTokens": 100, "cachedInputTokens": 20, "costUSD": 0.02}]}')
+    def test_same_date_aggregation(self, mock_run):
+        result = collect_codex_data()
+        d = result["2026-01-15"]
+        assert d["input_tokens"] == 90 + 180  # (100-10) + (200-20)
+        assert d["output_tokens"] == 150
+        assert d["cache_read_tokens"] == 30
 
 
 # --- collect_gemini_data ---
@@ -340,6 +395,31 @@ class TestCollectGeminiData:
         assert d["cache_read_tokens"] == 300
         assert d["cost"] > 0
 
+    @patch("tokenprint.Path")
+    @patch("builtins.open")
+    def test_malformed_log_lines_skipped(self, mock_file, mock_path):
+        """Malformed lines should be skipped without crashing."""
+        mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
+        mock_path.__truediv__ = lambda s, x: mock_path
+        mock_path.exists.return_value = True
+
+        good_line = json.dumps({
+            "timestamp": "2026-01-15T10:00:00Z",
+            "attributes": {"input_token_count": 500, "output_token_count": 200, "cached_content_token_count": 0}
+        })
+        lines = [
+            "not json at all\n",
+            '{"timestamp": "2026-01-15T10:00:00Z", "attributes": "not-a-dict"}\n',
+            '{"no_timestamp": true}\n',
+            good_line + "\n",
+        ]
+        mock_file.return_value.__enter__ = lambda s: iter(lines)
+        mock_file.return_value.__exit__ = lambda s, *a: None
+
+        result = collect_gemini_data()
+        assert "2026-01-15" in result
+        assert result["2026-01-15"]["input_tokens"] == 500
+
 
 # --- generate_html ---
 
@@ -362,6 +442,23 @@ class TestGenerateHtml:
             assert "chart.js" in html
         finally:
             os.unlink(output_path)
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_missing_template(self, mock_user):
+        """generate_html should raise FileNotFoundError if template.html is missing."""
+        import tokenprint as tp
+        data = merge_data(
+            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
+            {}, {},
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_file = tp.__file__
+            try:
+                tp.__file__ = os.path.join(tmpdir, "tokenprint.py")
+                with pytest.raises(FileNotFoundError):
+                    generate_html(data, os.path.join(tmpdir, "output.html"))
+            finally:
+                tp.__file__ = original_file
 
 
 # --- Date validation edge cases ---

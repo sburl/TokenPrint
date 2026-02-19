@@ -91,22 +91,32 @@ def collect_claude_data(since=None, until=None):
         date = entry.get("date", "")
         if not date:
             continue
-        daily[date] = {
-            "provider": "claude",
-            "input_tokens": entry.get("inputTokens", 0) or 0,
-            "output_tokens": entry.get("outputTokens", 0) or 0,
-            "cache_read_tokens": entry.get("cacheReadTokens", 0) or 0,
-            "cache_write_tokens": entry.get("cacheCreationTokens", 0) or 0,
-            "cost": entry.get("totalCost", 0) or 0,
-        }
+        if date not in daily:
+            daily[date] = {
+                "provider": "claude",
+                "input_tokens": 0, "output_tokens": 0,
+                "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
+            }
+        daily[date]["input_tokens"] += entry.get("inputTokens", 0) or 0
+        daily[date]["output_tokens"] += entry.get("outputTokens", 0) or 0
+        daily[date]["cache_read_tokens"] += entry.get("cacheReadTokens", 0) or 0
+        daily[date]["cache_write_tokens"] += entry.get("cacheCreationTokens", 0) or 0
+        daily[date]["cost"] += entry.get("totalCost", 0) or 0
     return daily
 
 
 def _parse_date_flexible(date_str):
     """Parse dates in ISO (2026-01-07) or human (Jan 7, 2026) format to YYYY-MM-DD."""
-    # Already ISO format
+    if not date_str:
+        return None
+    # Try ISO format first (validate calendar correctness)
     if len(date_str) >= 10 and date_str[4] == '-':
-        return date_str[:10]
+        candidate = date_str[:10]
+        try:
+            datetime.strptime(candidate, "%Y-%m-%d")
+            return candidate
+        except ValueError:
+            return None
     # Try human-readable formats
     for fmt in ("%b %d, %Y", "%B %d, %Y", "%b %d %Y"):
         try:
@@ -118,8 +128,7 @@ def _parse_date_flexible(date_str):
 
 def collect_codex_data(since=None, until=None):
     """Collect Codex CLI usage via @ccusage/codex."""
-    # TODO: pin to specific version for supply chain safety (e.g. @ccusage/codex@0.5.2)
-    cmd = ["npx", "@ccusage/codex@latest", "daily", "--json"]
+    cmd = ["npx", "@ccusage/codex@18", "daily", "--json"]
     if since:
         cmd.extend(["--since", since])
     if until:
@@ -165,14 +174,16 @@ def collect_codex_data(since=None, until=None):
     for date, input_tok, output_tok, cached_tok, cost in entries:
         if not cost and (input_tok or output_tok):
             cost = input_tok * rate_input + output_tok * rate_output + cached_tok * rate_cached
-        daily[date] = {
-            "provider": "codex",
-            "input_tokens": input_tok,
-            "output_tokens": output_tok,
-            "cache_read_tokens": cached_tok,
-            "cache_write_tokens": 0,
-            "cost": cost,
-        }
+        if date not in daily:
+            daily[date] = {
+                "provider": "codex",
+                "input_tokens": 0, "output_tokens": 0,
+                "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
+            }
+        daily[date]["input_tokens"] += input_tok
+        daily[date]["output_tokens"] += output_tok
+        daily[date]["cache_read_tokens"] += cached_tok
+        daily[date]["cost"] += cost
     return daily
 
 
@@ -224,12 +235,16 @@ def collect_gemini_data(since=None, until=None):
                 if isinstance(attrs, list):
                     attrs_dict = {}
                     for a in attrs:
+                        if not isinstance(a, dict):
+                            continue
                         key = a.get("Key", a.get("key", ""))
                         val = a.get("Value", a.get("value", {}))
                         if isinstance(val, dict):
                             val = val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
                         attrs_dict[key] = val
                     attrs = attrs_dict
+                if not isinstance(attrs, dict):
+                    continue
 
                 raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
                 output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))

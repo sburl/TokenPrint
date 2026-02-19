@@ -30,7 +30,7 @@ if command -v ccusage &>/dev/null; then
     echo "[ok] ccusage already installed: $(ccusage --version 2>&1 || echo 'installed')"
 else
     echo "Installing ccusage..."
-    npm install -g ccusage
+    npm install -g ccusage@18
     echo "[ok] ccusage installed"
 fi
 
@@ -39,7 +39,7 @@ echo ""
 echo "--- Codex CLI (@ccusage/codex) ---"
 # @ccusage/codex runs via npx, so just verify it's reachable
 echo "Verifying @ccusage/codex is accessible via npx..."
-if npx @ccusage/codex@latest --help &>/dev/null 2>&1; then
+if npx @ccusage/codex@18 --help &>/dev/null 2>&1; then
     echo "[ok] @ccusage/codex accessible via npx"
 else
     echo "[warn] @ccusage/codex may not be available. It runs via npx and requires Codex CLI usage logs to exist."

@@ -85,7 +85,7 @@
 </head>
 <body>
 <h1><span style="font-size: 1.1em; filter: grayscale(1) brightness(10);">⚡</span> TokenPrint</h1>
-<p class="subtitle"><span id="dateRange"></span> &middot; <span id="genTime"></span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Update</button></p>
+<p class="subtitle"><span id="dateRange"></span> &middot; <span id="genTime"></span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Refresh</button></p>
 <p class="token-summary" id="tokenSummary"></p>
 
 <div class="date-range">
@@ -212,7 +212,7 @@
 <h4>Data Sources</h4>
 <ul>
 <li><strong>Claude Code:</strong> <code>ccusage daily --json</code> — reads local JSONL logs from Claude Code sessions</li>
-<li><strong>Codex CLI:</strong> <code>npx @ccusage/codex@latest daily --json</code> — reads local Codex CLI session logs</li>
+<li><strong>Codex CLI:</strong> <code>npx @ccusage/codex@18 daily --json</code> — reads local Codex CLI session logs</li>
 <li><strong>Gemini CLI:</strong> OpenTelemetry file export at <code>~/.gemini/telemetry.log</code> (requires one-time setup). Only tracks sessions after telemetry is enabled.</li>
 </ul>
 
@@ -541,14 +541,49 @@ function updateMatrix(filtered, activeSet) {
   const columnTotals = [0, 0, 0];
   const columnTokenTotals = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
 
-  // Rebuild header with only active providers
-  let headerHtml = '<tr><th></th>';
-  activeIndices.forEach(i => headerHtml += '<th class="' + PROVIDERS[i] + '">' + PROVIDER_NAMES[i] + '</th>');
-  headerHtml += '<th>Total</th></tr>';
-  document.getElementById('matrixHead').innerHTML = headerHtml;
+  // Rebuild header with only active providers (DOM construction — no innerHTML)
+  const matrixHead = document.getElementById('matrixHead');
+  matrixHead.textContent = '';
+  const headerRow = document.createElement('tr');
+  headerRow.appendChild(document.createElement('th'));
+  activeIndices.forEach(i => {
+    const th = document.createElement('th');
+    th.className = PROVIDERS[i];
+    th.textContent = PROVIDER_NAMES[i];
+    headerRow.appendChild(th);
+  });
+  const thTotal = document.createElement('th');
+  thTotal.textContent = 'Total';
+  headerRow.appendChild(thTotal);
+  matrixHead.appendChild(headerRow);
+
+  // Helper: create a cost cell with tooltip
+  function createCostCell(cost, tokens, cssClass) {
+    const td = document.createElement('td');
+    td.className = cssClass || 'has-tip';
+    td.textContent = '$' + fmtFixed(cost, 2);
+    const tip = document.createElement('div');
+    tip.className = 'tip';
+    [['Input', tokens.input], ['Output', tokens.output], ['Cached', tokens.cached]].forEach(([label, val]) => {
+      const row = document.createElement('div');
+      row.className = 'tip-row';
+      const lbl = document.createElement('span');
+      lbl.className = 'tip-label';
+      lbl.textContent = label;
+      const v = document.createElement('span');
+      v.className = 'tip-val';
+      v.textContent = val.toLocaleString('en');
+      row.appendChild(lbl);
+      row.appendChild(v);
+      tip.appendChild(row);
+    });
+    td.appendChild(tip);
+    return td;
+  }
 
   // Build body rows
-  let bodyHtml = '';
+  const matrixBody = document.getElementById('matrixBody');
+  matrixBody.textContent = '';
   sortedMonths.forEach(month => {
     const costs = monthlyCost[month];
     const tokens = monthlyTokens[month];
@@ -560,18 +595,34 @@ function updateMatrix(filtered, activeSet) {
       columnTokenTotals[i].output += tokens[i].output;
       columnTokenTotals[i].cached += tokens[i].cached;
     });
-    bodyHtml += '<tr><td class="month-label">' + month + '</td>';
-    activeIndices.forEach(i => bodyHtml += '<td class="has-tip">$' + fmtFixed(costs[i], 2) + tooltipHtml(tokens[i]) + '</td>');
-    bodyHtml += '<td class="row-total">$' + fmtFixed(rowTotal, 2) + '</td></tr>';
+    const tr = document.createElement('tr');
+    const labelTd = document.createElement('td');
+    labelTd.className = 'month-label';
+    labelTd.textContent = month;
+    tr.appendChild(labelTd);
+    activeIndices.forEach(i => tr.appendChild(createCostCell(costs[i], tokens[i])));
+    const totalTd = document.createElement('td');
+    totalTd.className = 'row-total';
+    totalTd.textContent = '$' + fmtFixed(rowTotal, 2);
+    tr.appendChild(totalTd);
+    matrixBody.appendChild(tr);
   });
 
   // Totals row
   let grandTotal = 0;
   activeIndices.forEach(i => grandTotal += columnTotals[i]);
-  bodyHtml += '<tr class="col-totals"><td class="month-label">Total</td>';
-  activeIndices.forEach(i => bodyHtml += '<td class="has-tip">$' + fmtFixed(columnTotals[i], 2) + tooltipHtml(columnTokenTotals[i]) + '</td>');
-  bodyHtml += '<td class="row-total">$' + fmtFixed(grandTotal, 2) + '</td></tr>';
-  document.getElementById('matrixBody').innerHTML = bodyHtml;
+  const totalsRow = document.createElement('tr');
+  totalsRow.className = 'col-totals';
+  const totalsLabel = document.createElement('td');
+  totalsLabel.className = 'month-label';
+  totalsLabel.textContent = 'Total';
+  totalsRow.appendChild(totalsLabel);
+  activeIndices.forEach(i => totalsRow.appendChild(createCostCell(columnTotals[i], columnTokenTotals[i])));
+  const grandTotalTd = document.createElement('td');
+  grandTotalTd.className = 'row-total';
+  grandTotalTd.textContent = '$' + fmtFixed(grandTotal, 2);
+  totalsRow.appendChild(grandTotalTd);
+  matrixBody.appendChild(totalsRow);
 }
 
 // === 11. Dashboard Section: Update Charts ===
@@ -812,7 +863,7 @@ function toggleChart(key) {
 document.getElementById('startDate').addEventListener('change', updateDashboard);
 document.getElementById('endDate').addEventListener('change', updateDashboard);
 document.getElementById('updateBtn').addEventListener('click', function() {
-  this.textContent = 'Updating...';
+  this.textContent = 'Refreshing...';
   this.style.opacity = '0.5';
   setTimeout(() => window.location.reload(), 200);
 });
