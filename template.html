@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenPrint</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90' style='filter:grayscale(1) brightness(10)'>⚡</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" integrity="sha384-T/4KgSWuZEPozpPz7rnnp/5lDSnpY1VPJCojf1S81uTHS1E38qgLfMgVsAeRCWc4" crossorigin="anonymous"></script>
+<script>const TP = TOKENPRINT_DATA_PLACEHOLDER;</script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: #334155;
+    --text: #f1f5f9; --muted: #94a3b8; --accent: #6366f1;
+    --claude: #6366f1; --codex: #22c55e; --gemini: #f59e0b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.25rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; }
+  .card .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
+  .card .detail { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .chart-box { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; }
+  .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .chart-header h3 { font-size: 0.875rem; color: var(--muted); margin: 0; }
+  .toggle-btn { background: var(--accent); color: var(--text); border: none; border-radius: 0.375rem; padding: 0.25rem 0.625rem; font-size: 0.7rem; cursor: pointer; transition: all 0.15s; opacity: 0.8; }
+  .toggle-btn:hover { opacity: 1; }
+  .equiv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .equiv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem 1.25rem; display: flex; align-items: center; gap: 0.75rem; }
+  .equiv-card .emoji { font-size: 2rem; line-height: 1; flex-shrink: 0; }
+  .equiv-card .eq-content { flex: 1; }
+  .equiv-card .num { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+  .equiv-card .desc { color: var(--muted); font-size: 0.75rem; margin-top: 0.125rem; }
+  .legend { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 0.375rem; font-size: 0.8rem; color: var(--text); cursor: pointer; user-select: none; transition: opacity 0.15s; }
+  .legend-item.off { opacity: 0.35; }
+  .legend-item.off .legend-dot { background: var(--muted) !important; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .section-title { font-size: 1.1rem; margin: 2rem 0 1rem; color: var(--muted); }
+  .no-data { text-align: center; padding: 4rem 2rem; color: var(--muted); }
+  .token-summary { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
+  .date-range { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+  .date-range label { color: var(--muted); font-size: 0.8rem; }
+  .date-range input[type="date"] { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 0.375rem; padding: 0.375rem 0.5rem; font-size: 0.8rem; font-family: inherit; color-scheme: dark; }
+  .date-range input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); opacity: 0.6; }
+  .date-range input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+  .date-range button { background: var(--border); color: var(--muted); border: none; border-radius: 0.375rem; padding: 0.375rem 0.75rem; font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
+  .date-range button:hover { background: var(--accent); color: var(--text); }
+  .matrix-box { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 2rem; overflow-x: auto; }
+  .matrix-box h3 { font-size: 0.875rem; color: var(--muted); margin-bottom: 1rem; }
+  .cost-matrix { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .cost-matrix th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 1rem; text-align: right; border-bottom: 1px solid var(--border); }
+  .cost-matrix th:first-child { text-align: left; }
+  .cost-matrix td { padding: 0.5rem 1rem; text-align: right; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .cost-matrix .month-label { text-align: left; color: var(--muted); font-weight: 500; }
+  .cost-matrix .row-total { font-weight: 700; }
+  .cost-matrix .col-totals td { border-top: 2px solid var(--accent); font-weight: 700; border-bottom: none; }
+  .cost-matrix .col-totals .month-label { color: var(--text); }
+  .cost-matrix th.claude { color: var(--claude); }
+  .cost-matrix th.codex { color: var(--codex); }
+  .cost-matrix th.gemini { color: var(--gemini); }
+  .cost-matrix td.has-tip { cursor: help; position: relative; }
+  .cost-matrix td.has-tip:hover .tip { display: block; }
+  .tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #0f172a; border: 1px solid var(--accent); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.7rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }
+  .tip .tip-row { display: flex; justify-content: space-between; gap: 1rem; }
+  .tip .tip-label { color: var(--muted); }
+  .tip .tip-val { font-variant-numeric: tabular-nums; text-align: right; }
+  .assumptions { margin-top: 2rem; color: var(--muted); font-size: 0.8rem; }
+  .assumptions summary { cursor: pointer; color: var(--text); font-size: 0.9rem; padding: 0.75rem 0; }
+  .assumptions summary:hover { color: var(--accent); }
+  .assumptions-body { padding: 1rem 0; }
+  .assumptions-body h4 { color: var(--text); margin: 1rem 0 0.5rem; font-size: 0.85rem; }
+  .assumptions-body ul { padding-left: 1.25rem; }
+  .assumptions-body li { margin-bottom: 0.25rem; }
+  .assumptions-body table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; table-layout: fixed; }
+  .assumptions-body td { padding: 0.375rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; vertical-align: top; }
+  .assumptions-body td:first-child { color: var(--text); width: 35%; }
+  .assumptions-body td:nth-child(2) { width: 22%; font-variant-numeric: tabular-nums; }
+  .assumptions-body td:nth-child(3) { color: var(--muted); font-style: italic; width: 43%; }
+  .assumptions-body code { background: var(--surface); padding: 0.1rem 0.3rem; border-radius: 0.25rem; }
+</style>
+</head>
+<body>
+<h1><span style="font-size: 1.1em; filter: grayscale(1) brightness(10);">⚡</span> TokenPrint</h1>
+<p class="subtitle"><span id="dateRange"></span> &middot; <span id="genTime"></span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Update</button></p>
+<p class="token-summary" id="tokenSummary"></p>
+
+<div class="date-range">
+  <label>Range:</label>
+  <input type="date" id="startDate">
+  <span style="color: var(--muted); font-size: 0.8rem;">to</span>
+  <input type="date" id="endDate">
+  <button onclick="resetDates()">Reset</button>
+</div>
+
+<div class="legend">
+  <div class="legend-item" data-provider="claude" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--claude)"></div> Claude Code</div>
+  <div class="legend-item" data-provider="codex" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--codex)"></div> Codex CLI</div>
+  <div class="legend-item" data-provider="gemini" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--gemini)"></div> Gemini CLI</div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Total API Cost</div>
+    <div class="value" id="cardCostVal"></div>
+    <div class="detail" id="cardCostDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Total Tokens</div>
+    <div class="value" id="cardTokensVal"></div>
+    <div class="detail" id="cardTokensDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Input Tokens</div>
+    <div class="value" id="cardInputVal"></div>
+    <div class="detail" id="cardInputDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Output Tokens</div>
+    <div class="value" id="cardOutputVal"></div>
+    <div class="detail" id="cardOutputDetail"></div>
+  </div>
+</div>
+
+<div class="matrix-box">
+  <h3>Monthly Estimated API Cost by Provider</h3>
+  <table class="cost-matrix">
+    <thead id="matrixHead"><tr><th></th><th class="claude">Claude</th><th class="codex">Codex</th><th class="gemini">Gemini</th><th>Total</th></tr></thead>
+    <tbody id="matrixBody"></tbody>
+  </table>
+</div>
+
+<div class="charts">
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="costTitle">Daily Cost by Provider ($)</h3>
+      <button class="toggle-btn" onclick="toggleChart('cost')">Cumulative</button>
+    </div>
+    <canvas id="costChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="tokenTitle">Daily Token Use by Provider</h3>
+      <button class="toggle-btn" onclick="toggleChart('token')">Cumulative</button>
+    </div>
+    <canvas id="tokenChart"></canvas>
+  </div>
+</div>
+
+<h3 class="section-title">Environmental Impact</h3>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Energy Used</div>
+    <div class="value" id="cardEnergyVal"></div>
+    <div class="detail" id="cardEnergyDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">CO2 Emitted</div>
+    <div class="value" id="cardCarbonVal"></div>
+    <div class="detail" id="cardCarbonDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Water Used</div>
+    <div class="value" id="cardWaterVal"></div>
+    <div class="detail" id="cardWaterDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Electricity Cost</div>
+    <div class="value" id="cardElecVal"></div>
+    <div class="detail" id="cardElecDetail"></div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="energyTitle">Daily Energy by Provider</h3>
+      <button class="toggle-btn" onclick="toggleChart('energy')">Cumulative</button>
+    </div>
+    <canvas id="energyChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="carbonTitle">Daily CO2 Emissions</h3>
+      <button class="toggle-btn" onclick="toggleChart('carbon')">Cumulative</button>
+    </div>
+    <canvas id="carbonChart"></canvas>
+  </div>
+</div>
+
+<h3 class="section-title">Real-World Equivalents</h3>
+<div class="equiv">
+  <div class="equiv-card"><div class="emoji">🌯</div><div class="eq-content"><div class="num" id="eqBurrito"></div><div class="desc" id="eqBurritoDesc">Chipotle burritos of API cost (~$11.75 each)</div></div></div>
+  <div class="equiv-card"><div class="emoji">📖</div><div class="eq-content"><div class="num" id="eqBibles"></div><div class="desc" id="eqBiblesDesc">ft tall stack of Bibles (1 Bible ~ 1M tokens)</div></div></div>
+  <div class="equiv-card"><div class="emoji">🚘</div><div class="eq-content"><div class="num" id="eqTesla"></div><div class="desc" id="eqTeslaDesc">Tesla miles of energy (~0.25 kWh/mi)</div></div></div>
+  <div class="equiv-card"><div class="emoji">🚿</div><div class="eq-content"><div class="num" id="eqShowers"></div><div class="desc" id="eqShowersDesc">Showers of water used (~65 L each)</div></div></div>
+  <div class="equiv-card"><div class="emoji">✈️</div><div class="eq-content"><div class="num" id="eqFlights"></div><div class="desc" id="eqFlightsDesc">NYC-LA flights of CO2 (~90 kg each)</div></div></div>
+  <div class="equiv-card"><div class="emoji">🚗</div><div class="eq-content"><div class="num" id="eqCar"></div><div class="desc" id="eqCarDesc">Miles of CO2 in a gas car (25 mpg)</div></div></div>
+</div>
+
+<div style="text-align: center; margin: 1.5rem 0;">
+  <button onclick="generateShareImage()" style="background: var(--accent); color: var(--text); border: none; border-radius: 0.5rem; padding: 0.625rem 1.5rem; font-size: 0.95rem; cursor: pointer; font-family: inherit; transition: opacity 0.15s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">📸 Share My Impact</button>
+</div>
+
+<details class="assumptions">
+<summary>📋 Methodology & Assumptions</summary>
+<div class="assumptions-body">
+<h4>Data Sources</h4>
+<ul>
+<li><strong>Claude Code:</strong> <code>ccusage daily --json</code> — reads local JSONL logs from Claude Code sessions</li>
+<li><strong>Codex CLI:</strong> <code>npx @ccusage/codex@latest daily --json</code> — reads local Codex CLI session logs</li>
+<li><strong>Gemini CLI:</strong> OpenTelemetry file export at <code>~/.gemini/telemetry.log</code> (requires one-time setup). Only tracks sessions after telemetry is enabled.</li>
+</ul>
+
+<h4>Token Accounting (Caching)</h4>
+<p>Each provider reports cached tokens differently. TokenPrint normalizes all providers so that "input tokens" means <em>non-cached input only</em>, and "cached tokens" is separate. This prevents double-counting in energy/cost calculations.</p>
+<table>
+<tr><td>Claude (ccusage)</td><td><code>inputTokens</code> = non-cached only, <code>cacheReadTokens</code> = cached</td><td>No adjustment needed — fields are already separate</td></tr>
+<tr><td>Codex (@ccusage/codex)</td><td><code>inputTokens</code> <strong>includes</strong> cached, <code>cachedInputTokens</code> = cached</td><td>TokenPrint subtracts cached from input: <code>non_cached = inputTokens - cachedInputTokens</code></td></tr>
+<tr><td>Gemini (telemetry)</td><td><code>input_token_count</code> <strong>includes</strong> cached, <code>cached_content_token_count</code> = cached</td><td>Same adjustment: <code>non_cached = input_token_count - cached_content_token_count</code></td></tr>
+</table>
+
+<h4>Cost Estimates</h4>
+<ul>
+<li><strong>Claude:</strong> Cost from ccusage (uses Anthropic's published API pricing per model)</li>
+<li><strong>Codex (gpt-5-codex):</strong> Cost from ccusage (uses OpenAI's published pricing)</li>
+<li><strong>Codex (gpt-5.3-codex):</strong> No official API pricing yet. Uses gpt-5-codex rates ($0.69/M input, $2.76/M output, $0.17/M cached)</li>
+<li><strong>Gemini:</strong> Estimated at $1.25/M input, $10.00/M output, $0.125/M cached (Gemini 2.5 Pro pricing; cached = 10% of input rate)</li>
+</ul>
+
+<h4>Energy Model</h4>
+<table>
+<tr><td>Output tokens</td><td>0.001 Wh/token</td><td>Industry estimate for large language models. Consistent with IEA (2024) estimate of 2.9 Wh per ChatGPT query (~3,000 output tokens) and Luccioni et al. (2023) energy benchmarks for generative models.</td></tr>
+<tr><td>Input tokens</td><td>0.0002 Wh/token</td><td>~5x less compute than output (prefill vs autoregressive decode). Supported by de Vries (2023) analysis in Joule and Patterson et al. (2022) Google data center energy studies.</td></tr>
+<tr><td>Cached tokens</td><td>0.00005 Wh/token</td><td>~4x less than input — cache lookup avoids full prefill. Based on KV-cache architecture analysis and Anthropic prompt caching documentation.</td></tr>
+<tr><td>PUE (Power Usage Effectiveness)</td><td>1.2</td><td>Uptime Institute (2023) global average: 1.58; hyperscalers report 1.1–1.2. Google reported 1.10 fleet-wide (2023). 1.2 is a conservative hyperscale estimate.</td></tr>
+<tr><td>Grid transmission loss</td><td>5%</td><td>EIA (2024): US T&amp;D losses averaged ~5% of total generation. Lawrence Berkeley National Lab also estimates 4.7–5.5%.</td></tr>
+<tr><td>Electricity price</td><td>$0.13/kWh</td><td>EIA (2024): US average commercial electricity rate $0.1343/kWh. Large data centers may negotiate lower, but $0.13 is a reasonable average.</td></tr>
+</table>
+
+<h4>Carbon Model</h4>
+<table>
+<tr><td>Grid carbon intensity</td><td>390 gCO2e/kWh</td><td>EPA eGRID (2022): US national average 386.6 gCO2e/kWh. IEA (2023) reports US at ~390 gCO2e/kWh. Varies widely by region (50–800+).</td></tr>
+<tr><td>Embodied carbon</td><td>+20%</td><td>Gupta et al. (2022) "ACT": embodied carbon is 20–50% of server lifecycle emissions. Also consistent with Dell and HPE lifecycle assessments for GPU servers.</td></tr>
+</table>
+
+<h4>Water Model</h4>
+<table>
+<tr><td>Water Usage Effectiveness (WUE)</td><td>0.5 L/kWh</td><td>Google (2023 Environmental Report): fleet WUE 0.51 L/kWh. Li et al. (2023) "Making AI Less Thirsty" estimates 0.5–1.0 L/kWh for evaporative-cooled data centers.</td></tr>
+</table>
+
+<h4>Real-World Equivalents</h4>
+<table>
+<tr><td>US household electricity</td><td>~900 kg CO2/month</td><td>EPA average</td></tr>
+<tr><td>Gas car emissions</td><td>404 g CO2/mile</td><td>EPA average (25 mpg)</td></tr>
+<tr><td>NYC-LA flight</td><td>~90 kg CO2/passenger</td><td>Economy class, one way</td></tr>
+<tr><td>Tree offset</td><td>~22 kg CO2/year</td><td>Mature tree annual absorption</td></tr>
+<tr><td>Shower</td><td>~65 L water</td><td>8-minute average shower</td></tr>
+<tr><td>iPhone charge</td><td>~12.7 Wh</td><td>iPhone 15 battery capacity</td></tr>
+<tr><td>Tesla</td><td>~0.25 kWh/mile</td><td>Model 3 average efficiency</td></tr>
+<tr><td>US household electricity</td><td>~30 kWh/day</td><td>EIA average</td></tr>
+</table>
+
+<h4>Limitations</h4>
+<ul>
+<li>Energy per token is a rough industry estimate — actual consumption varies by model, hardware, and data center</li>
+<li>Carbon intensity varies significantly by region and time of day (renewables vs fossil)</li>
+<li>Codex gpt-5.3 pricing is estimated and will update when official pricing is available</li>
+<li>Gemini data only available from the point telemetry is enabled (no historical backfill)</li>
+<li>"Active days" counts only days with recorded usage, not calendar days</li>
+</ul>
+</div>
+</details>
+
+<script>
+// === 1. Config unpacking ===
+const RAW = TP.rawData;
+const GITHUB_USER = TP.githubUser;
+const PROVS = ['claude', 'codex', 'gemini'];
+const PKEYS = ['c', 'x', 'g'];
+const PCOLORS = ['#6366f1', '#22c55e', '#f59e0b'];
+const PNAMES = ['Claude', 'Codex', 'Gemini'];
+const EN = {OUT: 0.001, IN: 0.0002, CACHE: 0.00005, PUE: 1.2, GRID: 1.05};
+const CN = {INT: 390, EMB: 1.2, WUE: 0.5, ELEC: TP.electricityCostKwh};
+
+// === 2. Chart state ===
+const charts = {};
+const chartState = {};
+const chartConfigs = {};
+let currentLabels = [];
+
+// === 3. Base chart options ===
+const baseOpts = {
+  responsive: true,
+  plugins: {
+    legend: {
+      display: true,
+      labels: { color: '#94a3b8', boxWidth: 12, padding: 12, font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' }
+    }
+  },
+  scales: {
+    x: { ticks: { color: '#94a3b8', maxRotation: 45 }, grid: { color: '#1e293b' } },
+    y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+  }
+};
+const stackOpts = JSON.parse(JSON.stringify(baseOpts));
+stackOpts.scales.x.stacked = true;
+stackOpts.scales.y.stacked = true;
+
+// === 4. Formatting / calculation functions ===
+function cE(i,o,c) { return (o*EN.OUT + i*EN.IN + c*EN.CACHE) * EN.PUE * EN.GRID; }
+function cC(wh) { return (wh/1000) * CN.INT * CN.EMB; }
+function cW(wh) { return (wh/1000) * CN.WUE * 1000; }
+function fC(v) { return v >= 1000 ? '$'+v.toLocaleString('en',{maximumFractionDigits:0}) : v >= 0.01 ? '$'+v.toFixed(2) : '$'+v.toFixed(4); }
+function fT(v) {
+  if (v >= 1e9) { const u=v/1e9; return (u>=10?u.toFixed(0):u.toFixed(2))+' B'; }
+  if (v >= 1e6) { const u=v/1e6; return (u>=10?u.toFixed(0):u.toFixed(2))+' M'; }
+  if (v >= 1e3) { const u=v/1e3; return (u>=10?u.toFixed(0):u.toFixed(2))+' K'; }
+  return v.toLocaleString('en');
+}
+function fEn(wh) { return wh >= 1e6 ? (wh/1e6).toFixed(2)+' MWh' : wh >= 1e3 ? (wh/1e3).toFixed(2)+' kWh' : wh.toFixed(1)+' Wh'; }
+function fCO(g) { return g >= 1e6 ? (g/1e6).toFixed(2)+' tonnes' : g >= 1e3 ? (g/1e3).toFixed(2)+' kg' : g.toFixed(1)+' g'; }
+function fWa(ml) { return ml >= 1e6 ? (ml/1e6).toFixed(2)+' m\u00b3' : ml >= 1e3 ? (ml/1e3).toFixed(2)+' L' : ml.toFixed(0)+' mL'; }
+function fN(v) { return v >= 10 ? v.toLocaleString('en',{maximumFractionDigits:0}) : v >= 1 ? v.toFixed(1) : v.toFixed(2); }
+function fFix(v,d) { return v.toLocaleString('en',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+
+function tipH(t) {
+  return '<div class="tip"><div class="tip-row"><span class="tip-label">Input</span><span class="tip-val">'+t.i.toLocaleString('en')+'</span></div>'
+    +'<div class="tip-row"><span class="tip-label">Output</span><span class="tip-val">'+t.o.toLocaleString('en')+'</span></div>'
+    +'<div class="tip-row"><span class="tip-label">Cached</span><span class="tip-val">'+t.c.toLocaleString('en')+'</span></div></div>';
+}
+
+// === 5. Provider toggle ===
+function toggleProvider(el) {
+  el.classList.toggle('off');
+  updateDashboard();
+}
+function enabledProviders() {
+  const items = document.querySelectorAll('.legend-item');
+  const on = [];
+  items.forEach(el => { if (!el.classList.contains('off')) on.push(el.dataset.provider); });
+  return on;
+}
+
+// === 6. updateDashboard ===
+function updateDashboard() {
+  const s = document.getElementById('startDate').value;
+  const e = document.getElementById('endDate').value;
+  const fd = RAW.filter(r => r.d >= s && r.d <= e);
+  if (!fd.length) return;
+  const n = fd.length;
+  const dl = fd.map(r => r.d);
+  currentLabels = dl;
+  const ep = enabledProviders();
+  const epSet = new Set(ep);
+
+  // Totals (only enabled providers)
+  let tot = {cost:0,inp:0,out:0,cached:0,energy:0,carbon:0,water:0};
+  let pv = {claude:{cost:0,en:0,co:0},codex:{cost:0,en:0,co:0},gemini:{cost:0,en:0,co:0}};
+  fd.forEach(row => {
+    PKEYS.forEach((k,i) => {
+      if (!epSet.has(PROVS[i])) return;
+      const [inp,out,cached,cost] = row[k];
+      const en = cE(inp,out,cached);
+      tot.cost += cost; tot.inp += inp; tot.out += out; tot.cached += cached;
+      tot.energy += en; tot.carbon += cC(en); tot.water += cW(en);
+      pv[PROVS[i]].cost += cost; pv[PROVS[i]].en += en; pv[PROVS[i]].co += cC(en);
+    });
+  });
+  const tTok = tot.inp + tot.out + tot.cached;
+
+  // Header
+  setText('dateRange', dl[0]+' to '+dl[dl.length-1]+' ('+n+' active days)');
+  setText('tokenSummary', tTok.toLocaleString('en-US')+' total tokens \u00b7 '+tot.inp.toLocaleString('en-US')+' input \u00b7 '+tot.out.toLocaleString('en-US')+' output \u00b7 '+tot.cached.toLocaleString('en-US')+' cached');
+
+  // Usage cards
+  const allInp = tot.inp + tot.cached;
+  const cacheRate = allInp > 0 ? (tot.cached / allInp * 100).toFixed(0) : 0;
+
+  // Cost: per-M-token rate + provider percentages
+  const costPerM = tTok > 0 ? tot.cost / (tTok / 1e6) : 0;
+  let costParts = [];
+  [['claude','Claude'],['codex','Codex'],['gemini','Gemini']].forEach(([key,name]) => {
+    if (epSet.has(key)) {
+      const pct = tot.cost > 0 ? (pv[key].cost/tot.cost*100).toFixed(0) : 0;
+      costParts.push(name+' '+pct+'%');
+    }
+  });
+  let costDetail = fC(costPerM)+'/M tokens \u00b7 '+costParts.join(' \u00b7 ');
+  setText('cardCostVal', fC(tot.cost));
+  setText('cardCostDetail', costDetail);
+
+  // Tokens: daily avg + busiest day (enabled providers only)
+  let busiestVal = 0, busiestDate = '';
+  fd.forEach(row => {
+    let dt = 0;
+    PKEYS.forEach((k,i) => { if (epSet.has(PROVS[i])) dt += row[k][0]+row[k][1]+row[k][2]; });
+    if (dt > busiestVal) { busiestVal = dt; busiestDate = row.d; }
+  });
+  let bDateStr = 'N/A';
+  if (busiestDate) {
+    const parts = busiestDate.split('-');
+    const bDateObj = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    bDateStr = bDateObj.toLocaleDateString('en',{month:'short',day:'numeric'});
+  }
+  setText('cardTokensVal', fT(tTok));
+  setText('cardTokensDetail', fT(tTok/n)+'/day avg \u00b7 busiest: '+fT(busiestVal)+' ('+bDateStr+')');
+
+  // Per-provider known rates: [input, output, cached] per token
+  const RATES = {c:[3e-6,15e-6,0.30e-6], x:[0.69e-6,2.76e-6,0.17e-6], g:[1.25e-6,10.0e-6,0.125e-6]};
+
+  // Input: cache hit rate + savings using actual per-provider rates
+  let cacheSavings = 0;
+  fd.forEach(row => {
+    [['c','claude'],['x','codex'],['g','gemini']].forEach(([k,p]) => {
+      if (!epSet.has(p)) return;
+      const cached = row[k][2];
+      const r = RATES[k];
+      cacheSavings += cached * (r[0] - r[2]); // saved = cached * (input_rate - cached_rate)
+    });
+  });
+  setText('cardInputVal', fT(tot.inp));
+  setText('cardInputDetail', cacheRate+'% cache hit rate \u00b7 ~'+fC(cacheSavings)+' saved by caching');
+
+  // Output: estimate actual output cost using known rates per provider
+  let estOutCost = 0, estAllCost = 0;
+  fd.forEach(row => {
+    [['c','claude',RATES.c],['x','codex',RATES.x],['g','gemini',RATES.g]].forEach(([k,p,r]) => {
+      if (!epSet.has(p)) return;
+      const [inp,out,cached] = row[k];
+      estOutCost += out * r[1];
+      estAllCost += inp * r[0] + out * r[1] + cached * r[2];
+    });
+  });
+  const outCostPct = estAllCost > 0 ? (estOutCost / estAllCost * 100).toFixed(0) : 0;
+  const costPerMOut = tot.out > 0 ? estOutCost / (tot.out / 1e6) : 0;
+  setText('cardOutputVal', fT(tot.out));
+  setText('cardOutputDetail', '~'+outCostPct+'% of est. cost \u00b7 '+fC(costPerMOut)+'/M avg rate');
+
+  // Env cards
+  const ec = (tot.energy/1000)*CN.ELEC;
+  const elecPct = tot.cost > 0 ? (ec/tot.cost*100) : 0;
+  const usDays = (tot.energy/1000)/30;
+  const teslaMi = (tot.energy/1000)*4;
+  const eCtx = teslaMi >= 1 ? '~'+fFix(teslaMi,1)+' mi in a Tesla' : '~'+fFix(tot.energy/12.7,0)+' iPhone charges';
+  setText('cardEnergyVal', fEn(tot.energy));
+  const enParts = []; ep.forEach(p => { if (pv[p].en > 0) enParts.push(p.charAt(0).toUpperCase()+p.slice(1)+' '+fEn(pv[p].en)); });
+  setText('cardEnergyDetail', eCtx+(enParts.length ? ' \u00b7 '+enParts.join(' \u00b7 ') : ''));
+  setText('cardCarbonVal', fCO(tot.carbon));
+  const coParts = []; ep.forEach(p => { if (pv[p].co > 0) coParts.push(p.charAt(0).toUpperCase()+p.slice(1)+' '+fCO(pv[p].co)); });
+  setText('cardCarbonDetail', coParts.join(' \u00b7 ') || 'No data');
+  setText('cardWaterVal', fWa(tot.water));
+  setText('cardWaterDetail', '~'+fN(tot.water/65000)+' showers');
+  setText('cardElecVal', '$'+fFix(ec,2));
+  setText('cardElecDetail', fFix(elecPct,2)+'% of API cost');
+
+  // Equivalents
+  const cKg = tot.carbon/1000;
+  setText('eqTesla', fN((tot.energy/1000)*4));
+  setText('eqFlights', fN(cKg/90));
+  setText('eqShowers', fN(tot.water/65000));
+  setText('eqBurrito', fN(tot.cost/11.75));
+  setText('eqBibles', fN(tTok/1044000*1.5/12));
+  setText('eqCar', fN(cKg/0.404));
+
+  // Matrix (only enabled provider columns)
+  const epIdx = []; // indices of enabled providers
+  PROVS.forEach((p,i) => { if (epSet.has(p)) epIdx.push(i); });
+  const mo = {}, mt = {};
+  fd.forEach(row => {
+    const m = row.d.slice(0,7);
+    if (!mo[m]) { mo[m] = [0,0,0]; mt[m] = PKEYS.map(()=>({i:0,o:0,c:0})); }
+    epIdx.forEach(i => {
+      mo[m][i] += row[PKEYS[i]][3];
+      mt[m][i].i += row[PKEYS[i]][0]; mt[m][i].o += row[PKEYS[i]][1]; mt[m][i].c += row[PKEYS[i]][2];
+    });
+  });
+  const mk = Object.keys(mo).sort();
+  if (mk.length >= 2) {
+    let [_fy,_fm] = mk[0].split('-').map(Number);
+    const [_ey,_em] = mk[mk.length-1].split('-').map(Number);
+    while (_fy < _ey || (_fy === _ey && _fm <= _em)) {
+      const k = String(_fy)+'-'+String(_fm).padStart(2,'0');
+      if (!mo[k]) { mo[k] = [0,0,0]; mt[k] = PKEYS.map(()=>({i:0,o:0,c:0})); }
+      _fm++; if (_fm > 12) { _fm = 1; _fy++; }
+    }
+  }
+  const sm = Object.keys(mo).sort();
+  const ct = [0,0,0], ctk = PKEYS.map(()=>({i:0,o:0,c:0}));
+  // Rebuild header with only enabled providers
+  let hdr = '<tr><th></th>';
+  epIdx.forEach(i => hdr += '<th class="'+PROVS[i]+'">'+PNAMES[i]+'</th>');
+  hdr += '<th>Total</th></tr>';
+  document.getElementById('matrixHead').innerHTML = hdr;
+  let mh = '';
+  sm.forEach(m => {
+    const c = mo[m], t = mt[m];
+    let rt = 0; epIdx.forEach(i => rt += c[i]);
+    epIdx.forEach(i => { ct[i]+=c[i]; ctk[i].i+=t[i].i; ctk[i].o+=t[i].o; ctk[i].c+=t[i].c; });
+    mh += '<tr><td class="month-label">'+m+'</td>';
+    epIdx.forEach(i => mh += '<td class="has-tip">$'+fFix(c[i],2)+tipH(t[i])+'</td>');
+    mh += '<td class="row-total">$'+fFix(rt,2)+'</td></tr>';
+  });
+  let gt = 0; epIdx.forEach(i => gt += ct[i]);
+  mh += '<tr class="col-totals"><td class="month-label">Total</td>';
+  epIdx.forEach(i => mh += '<td class="has-tip">$'+fFix(ct[i],2)+tipH(ctk[i])+'</td>');
+  mh += '<td class="row-total">$'+fFix(gt,2)+'</td></tr>';
+  document.getElementById('matrixBody').innerHTML = mh;
+
+  // Charts (only enabled providers)
+  const pd = {};
+  PROVS.forEach(p => { pd[p] = {cost:[],tok:[],en:[],co:[]}; });
+  const dcg = [];
+  fd.forEach(row => {
+    let dc = 0;
+    PKEYS.forEach((k,i) => {
+      if (!epSet.has(PROVS[i])) return;
+      const [inp,out,cached,cost] = row[k];
+      const en = cE(inp,out,cached), co = cC(en);
+      pd[PROVS[i]].cost.push(Math.round(cost*100)/100);
+      pd[PROVS[i]].tok.push(inp+out+cached);
+      pd[PROVS[i]].en.push(en);
+      pd[PROVS[i]].co.push(co);
+      dc += co;
+    });
+    dcg.push(dc);
+  });
+
+  const sumEp = (obj, key, i) => ep.reduce((s,p) => s + (pd[p][key][i]||0), 0);
+  const maxE = Math.max(...fd.map((_,i) => sumEp(pd,'en',i)), 0);
+  const [eD,eU] = maxE >= 1e6 ? [1e6,'MWh'] : maxE >= 500 ? [1e3,'kWh'] : [1,'Wh'];
+  const maxCo = Math.max(...dcg, 0);
+  const [cD,cU] = maxCo >= 1e6 ? [1e6,'tonnes'] : maxCo >= 500 ? [1e3,'kg'] : [1,'g'];
+  const maxTk = Math.max(...fd.map((_,i) => sumEp(pd,'tok',i)), 0);
+  const [tD,tU] = maxTk >= 1e9 ? [1e9,'B tokens'] : maxTk >= 1e6 ? [1e6,'M tokens'] : maxTk >= 1e3 ? [1e3,'K tokens'] : [1,'tokens'];
+
+  const sc = {}, cu = {};
+  ep.forEach(p => {
+    sc[p] = {
+      cost: pd[p].cost,
+      tok: pd[p].tok.map(v => Math.round(v/tD*100)/100),
+      en: pd[p].en.map(v => Math.round(v/eD*10000)/10000),
+      co: pd[p].co.map(v => Math.round(v/cD*10000)/10000),
+    };
+    cu[p] = {cost:[],tok:[],en:[],co:[]};
+    let cc=0,ct2=0,ce2=0,co2=0;
+    fd.forEach((_,i) => {
+      cc+=pd[p].cost[i]; ct2+=pd[p].tok[i]; ce2+=pd[p].en[i]; co2+=pd[p].co[i];
+      cu[p].cost.push(Math.round(cc*100)/100);
+      cu[p].tok.push(Math.round(ct2/tD*100)/100);
+      cu[p].en.push(Math.round(ce2/eD*100)/100);
+      cu[p].co.push(Math.round(co2/cD*100)/100);
+    });
+  });
+
+  // Total cumulative (sum of enabled providers)
+  const cuTotal = {cost:[],tok:[],en:[],co:[]};
+  fd.forEach((_,i) => {
+    ['cost','tok','en','co'].forEach(k => {
+      cuTotal[k].push(Math.round(ep.reduce((s,p) => s + cu[p][k][i], 0)*100)/100);
+    });
+  });
+
+  // Build dynamic tooltip options matching the static ones
+  function dynDailyOpts(unit, isPrefix, extraFn) {
+    const o = JSON.parse(JSON.stringify(stackOpts));
+    const pre = isPrefix ? unit : '';
+    const suf = isPrefix ? '' : ' '+unit;
+    o.plugins.tooltip = { usePointStyle:true, callbacks: {
+      label: function(ctx) { return ' '+ctx.dataset.label+': '+pre+fFix(ctx.raw||0,2)+suf; },
+      footer: function(items) {
+        const total = items.reduce((s,i)=>s+(i.raw||0),0);
+        let l = ['Total: '+pre+fFix(total,2)+suf];
+        if (extraFn) l.push(extraFn(items, total));
+        return l;
+      }
+    } };
+    return o;
+  }
+  function dynCumOpts(unit, isPrefix, extraFn) {
+    const o = JSON.parse(JSON.stringify(baseOpts));
+    o.plugins.legend.labels.usePointStyle = true;
+    o.plugins.legend.labels.pointStyle = 'circle';
+    o.interaction = {mode:'index',intersect:false};
+    const pre = isPrefix ? unit : '';
+    const suf = isPrefix ? '' : ' '+unit;
+    o.plugins.tooltip = { mode:'index', intersect:false, usePointStyle:true, callbacks: {
+      label: function(ctx) { return ' '+ctx.dataset.label+': '+pre+fFix(ctx.raw||0,2)+suf; },
+      afterBody: function(items) {
+        const idx = items[0].dataIndex;
+        const total = items.reduce((s,i)=>s+(i.raw||0),0);
+        const days = idx+1, avg = total/days;
+        let l = ['','Total: '+pre+fFix(total,2)+suf, 'Daily avg: '+pre+fFix(avg,2)+suf+' over '+days+' days'];
+        if (extraFn) l.push(extraFn(items,total,idx));
+        return l;
+      }
+    } };
+    return o;
+  }
+
+  const dCostO = dynDailyOpts('$', true, null);
+  // Smart token formatting for filtered data
+  function fmtTokD(val) {
+    const abs = Math.abs(val) * tD;
+    if (abs >= 1e9) { const v = abs/1e9; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' B tokens'; }
+    if (abs >= 1e6) { const v = abs/1e6; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' M tokens'; }
+    if (abs >= 1e3) { const v = abs/1e3; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' K tokens'; }
+    return abs.toFixed(0) + ' tokens';
+  }
+  const dTokO = (function() {
+    const o = JSON.parse(JSON.stringify(stackOpts));
+    o.plugins.tooltip = { usePointStyle:true, callbacks: {
+      label: function(ctx) { return ' '+ctx.dataset.label+': '+fmtTokD(ctx.raw||0); },
+      footer: function(items) {
+        const total = items.reduce((s,i)=>s+(i.raw||0),0);
+        return 'Total: '+fmtTokD(total);
+      }
+    } };
+    return o;
+  })();
+  const dEnO = dynDailyOpts(eU, false, function(items, total) {
+    const kw = total*eD/1000;
+    return 'Electricity: $'+fFix(kw*CN.ELEC,2)+' (~'+fFix(kw*4,1)+' mi in a Tesla)';
+  });
+  const dCoO = dynDailyOpts(cU, false, function(items, total) {
+    const idx = items[0].dataIndex;
+    return '~'+fFix(dcg[idx]/1000/0.404,2)+' mi in a gas car (25 mpg)';
+  });
+  const cCostO = dynCumOpts('$', true, null);
+  const cTokO = (function() {
+    const o = JSON.parse(JSON.stringify(baseOpts));
+    o.plugins.legend.labels.usePointStyle = true;
+    o.plugins.legend.labels.pointStyle = 'circle';
+    o.interaction = {mode:'index',intersect:false};
+    o.plugins.tooltip = {mode:'index',intersect:false, usePointStyle:true, callbacks: {
+      label: function(ctx) { return ' '+ctx.dataset.label+': '+fmtTokD(ctx.raw||0); },
+      afterBody: function(items) {
+        const idx = items[0].dataIndex;
+        const total = items.reduce((s,i)=>s+(i.raw||0),0);
+        const days = idx+1, avg = total/days;
+        return ['','Total: '+fmtTokD(total),'Daily avg: '+fmtTokD(avg)+' over '+days+' days'];
+      }
+    }};
+    return o;
+  })();
+  const cEnO = dynCumOpts(eU, false, function(items, total) {
+    const kw = total*eD/1000;
+    return 'Electricity: $'+fFix(kw*CN.ELEC,2)+' (~'+fFix(kw*4,1)+' mi in a Tesla)';
+  });
+  const cCoO = dynCumOpts(cU, false, function(items, total) {
+    return '~'+fFix(total*cD/1000/0.404,2)+' mi in a gas car (25 mpg)';
+  });
+
+  function mkDS(key, bar) {
+    if (bar) {
+      return ep.map(p => {
+        const i = PROVS.indexOf(p);
+        return { label: PNAMES[i], data: sc[p][key], backgroundColor: PCOLORS[i] };
+      });
+    }
+    // Cumulative: Total line first, then per-provider
+    const ds = [{ label: 'Total', data: cuTotal[key], borderColor: '#e2e8f0', backgroundColor: '#e2e8f0', borderDash: [5,3], borderWidth: 2, fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8 }];
+    ep.forEach(p => {
+      const i = PROVS.indexOf(p);
+      ds.push({ label: PNAMES[i], data: cu[p][key], borderColor: PCOLORS[i], backgroundColor: PCOLORS[i], fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8 });
+    });
+    return ds;
+  }
+
+  chartConfigs.cost = {
+    canvas:'costChart', titleEl:'costTitle',
+    dailyTitle:'Daily Cost by Provider ($)', cumTitle:'Cumulative Cost by Provider ($)',
+    daily: {type:'bar', datasets: mkDS('cost',true), options: dCostO},
+    cum: {type:'line', datasets: mkDS('cost',false), options: cCostO},
+  };
+  chartConfigs.token = {
+    canvas:'tokenChart', titleEl:'tokenTitle',
+    dailyTitle:'Daily Token Use by Provider ('+tU+')', cumTitle:'Cumulative Tokens by Provider ('+tU+')',
+    daily: {type:'bar', datasets: mkDS('tok',true), options: dTokO},
+    cum: {type:'line', datasets: mkDS('tok',false), options: cTokO},
+  };
+  chartConfigs.energy = {
+    canvas:'energyChart', titleEl:'energyTitle',
+    dailyTitle:'Daily Energy by Provider ('+eU+')', cumTitle:'Cumulative Energy ('+eU+')',
+    daily: {type:'bar', datasets: mkDS('en',true), options: dEnO},
+    cum: {type:'line', datasets: mkDS('en',false), options: cEnO},
+  };
+  chartConfigs.carbon = {
+    canvas:'carbonChart', titleEl:'carbonTitle',
+    dailyTitle:'Daily CO2 Emissions ('+cU+')', cumTitle:'Cumulative CO2 ('+cU+')',
+    daily: {type:'bar', datasets: mkDS('co',true), options: dCoO},
+    cum: {type:'line', datasets: mkDS('co',false), options: cCoO},
+  };
+
+  Object.keys(chartConfigs).forEach(key => {
+    if (!(key in chartState)) chartState[key] = 'daily';
+    const cfg = chartConfigs[key];
+    const mode = chartState[key] === 'cum' ? cfg.cum : cfg.daily;
+    if (charts[key]) charts[key].destroy();
+    charts[key] = new Chart(document.getElementById(cfg.canvas), {
+      type: mode.type, data: { labels: dl, datasets: mode.datasets }, options: mode.options,
+    });
+    document.getElementById(cfg.titleEl).textContent = chartState[key]==='cum' ? cfg.cumTitle : cfg.dailyTitle;
+  });
+}
+
+// === 7. toggleChart ===
+function toggleChart(key) {
+  const cfg = chartConfigs[key];
+  const isCum = chartState[key] === 'daily';
+  chartState[key] = isCum ? 'cum' : 'daily';
+  const mode = isCum ? cfg.cum : cfg.daily;
+
+  // Destroy and recreate (type change requires this)
+  charts[key].destroy();
+  charts[key] = new Chart(document.getElementById(cfg.canvas), {
+    type: mode.type,
+    data: { labels: currentLabels, datasets: mode.datasets },
+    options: mode.options,
+  });
+
+  // Update title and button
+  document.getElementById(cfg.titleEl).textContent = isCum ? cfg.cumTitle : cfg.dailyTitle;
+  const btn = document.getElementById(cfg.titleEl).parentElement.querySelector('.toggle-btn');
+  btn.textContent = isCum ? 'Daily' : 'Cumulative';
+}
+
+// === 8. Event handlers ===
+document.getElementById('startDate').addEventListener('change', updateDashboard);
+document.getElementById('endDate').addEventListener('change', updateDashboard);
+document.getElementById('updateBtn').addEventListener('click', function() {
+  this.textContent = 'Updating...';
+  this.style.opacity = '0.5';
+  setTimeout(() => window.location.reload(), 200);
+});
+function resetDates() {
+  if (!RAW.length) return;
+  document.getElementById('startDate').value = RAW[0].d;
+  document.getElementById('endDate').value = RAW[RAW.length-1].d;
+  updateDashboard();
+}
+
+// === 9. Share image functions ===
+function drawRoundedRect(ctx, x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  let curY = y;
+  for (let i = 0; i < words.length; i++) {
+    const test = line + words[i] + ' ';
+    if (ctx.measureText(test).width > maxWidth && i > 0) {
+      ctx.fillText(line.trim(), x, curY);
+      line = words[i] + ' ';
+      curY += lineHeight;
+    } else {
+      line = test;
+    }
+  }
+  ctx.fillText(line.trim(), x, curY);
+  return curY;
+}
+
+function generateShareImage() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 630;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 1200, 630);
+
+  // Read live DOM values
+  const dateRange = document.getElementById('dateRange').textContent;
+  const tokenSummary = document.getElementById('tokenSummary').textContent;
+  const totalTokensMatch = tokenSummary.match(/^([\d,]+)/);
+  const totalTokens = totalTokensMatch ? totalTokensMatch[1] : '0';
+
+  // Format token count for header
+  const tokNum = parseInt(totalTokens.replace(/,/g, ''), 10) || 0;
+  let tokDisplay;
+  if (tokNum >= 1e9) { const v = tokNum/1e9; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'B'; }
+  else if (tokNum >= 1e6) { const v = tokNum/1e6; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'M'; }
+  else if (tokNum >= 1e3) { const v = tokNum/1e3; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'K'; }
+  else { tokDisplay = tokNum.toLocaleString(); }
+
+  // Parse date range into pretty format: "Jan 15 - Feb 18, 2026"
+  const drMatch = dateRange.match(/(\d{4})-(\d{2})-(\d{2})\s+to\s+(\d{4})-(\d{2})-(\d{2})\s*\((\d+)/);
+  let prettyDate = dateRange;
+  let activeDays = '';
+  if (drMatch) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const m1 = months[parseInt(drMatch[2],10)-1], d1 = parseInt(drMatch[3],10);
+    const m2 = months[parseInt(drMatch[5],10)-1], d2 = parseInt(drMatch[6],10);
+    const y2 = drMatch[4];
+    prettyDate = m1 + ' ' + d1 + ' \u2013 ' + m2 + ' ' + d2 + ', ' + y2;
+    activeDays = drMatch[7] + ' active days';
+  }
+
+  // --- Header block: name + token count (large), date subtitle ---
+  ctx.textAlign = 'left';
+
+  // Name
+  ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#f1f5f9';
+  const displayName = '@' + GITHUB_USER;
+  ctx.fillText(displayName, 48, 58);
+
+  // Token count badge next to name
+  const nameWidth = ctx.measureText(displayName).width;
+  ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#6366f1';
+  ctx.fillText(tokDisplay + ' tokens', 48 + nameWidth + 18, 58);
+
+  // Date range + active days + cost — muted subtitle
+  const costEl = document.getElementById('cardCostVal');
+  const costText = costEl ? costEl.textContent : '';
+  let subtitleParts = [prettyDate];
+  if (activeDays) subtitleParts.push(activeDays);
+  if (costText) subtitleParts.push(costText + ' API cost');
+  ctx.font = '18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(subtitleParts.join('  \u00b7  '), 50, 88);
+
+  // Subtle divider line
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(48, 104);
+  ctx.lineTo(1152, 104);
+  ctx.stroke();
+
+  // Card data from DOM
+  const shareCards = [
+    { emoji: '\ud83c\udf2f', id: 'eqBurrito', descId: 'eqBurritoDesc' },
+    { emoji: '\ud83d\udcd6', id: 'eqBibles', descId: 'eqBiblesDesc' },
+    { emoji: '\ud83d\ude98', id: 'eqTesla', descId: 'eqTeslaDesc' },
+    { emoji: '\ud83d\ude97', id: 'eqCar', descId: 'eqCarDesc' },
+    { emoji: '\u2708\ufe0f', id: 'eqFlights', descId: 'eqFlightsDesc' },
+    { emoji: '\ud83d\udebf', id: 'eqShowers', descId: 'eqShowersDesc' },
+  ];
+
+  // Grid layout: 2 rows x 3 cols
+  const gridX = 40, gridY = 118;
+  const cardW = 365, cardH = 210, gapX = 14, gapY = 14;
+
+  shareCards.forEach((card, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = gridX + col * (cardW + gapX);
+    const y = gridY + row * (cardH + gapY);
+
+    // Card background
+    drawRoundedRect(ctx, x, y, cardW, cardH, 12, '#1e293b', '#334155');
+
+    // Emoji
+    ctx.font = '48px serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillText(card.emoji, x + 20, y + 68);
+
+    // Number (accent color)
+    const numEl = document.getElementById(card.id);
+    const numText = numEl ? numEl.textContent : '0';
+    ctx.font = 'bold 44px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#6366f1';
+    ctx.textAlign = 'left';
+    ctx.fillText(numText, x + 85, y + 68);
+
+    // Description
+    const descEl = document.getElementById(card.descId);
+    const descText = descEl ? descEl.textContent : '';
+    ctx.font = '14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'left';
+    wrapText(ctx, descText, x + 20, y + 115, cardW - 40, 20);
+  });
+
+  // Footer — no box, just subtle text, right-aligned
+  ctx.font = '20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.textAlign = 'right';
+  ctx.fillText('github.com/sburl/TokenPrint', 1165, 618);
+
+  showSharePreview(canvas);
+}
+
+function showSharePreview(canvas) {
+  // Remove existing modal if any
+  const existing = document.getElementById('shareModal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'shareModal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1.5rem;max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center;gap:1rem;';
+
+  const img = document.createElement('img');
+  img.src = canvas.toDataURL('image/png');
+  img.style.cssText = 'max-width:100%;max-height:60vh;border-radius:0.5rem;';
+  modal.appendChild(img);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;';
+
+  // Download button
+  const dlBtn = document.createElement('button');
+  dlBtn.textContent = 'Download PNG';
+  dlBtn.style.cssText = 'background:#6366f1;color:#f1f5f9;border:none;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  dlBtn.addEventListener('click', function() {
+    const a = document.createElement('a');
+    a.download = 'tokenprint-' + GITHUB_USER + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  });
+  btnRow.appendChild(dlBtn);
+
+  // Copy button
+  const cpBtn = document.createElement('button');
+  cpBtn.textContent = 'Copy to Clipboard';
+  cpBtn.style.cssText = 'background:#334155;color:#f1f5f9;border:1px solid #475569;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  cpBtn.addEventListener('click', function() {
+    canvas.toBlob(function(blob) {
+      if (!blob) { cpBtn.textContent = 'Failed'; return; }
+      try {
+        navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+          .then(function() { cpBtn.textContent = 'Copied!'; setTimeout(function() { cpBtn.textContent = 'Copy to Clipboard'; }, 2000); })
+          .catch(function() { cpBtn.textContent = 'Copy failed (try Download)'; });
+      } catch (err) {
+        cpBtn.textContent = 'Copy not supported (try Download)';
+      }
+    }, 'image/png');
+  });
+  btnRow.appendChild(cpBtn);
+
+  // Close button
+  const clBtn = document.createElement('button');
+  clBtn.textContent = 'Close';
+  clBtn.style.cssText = 'background:transparent;color:#94a3b8;border:1px solid #475569;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  clBtn.addEventListener('click', function() { overlay.remove(); });
+  btnRow.appendChild(clBtn);
+
+  modal.appendChild(btnRow);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+// === 10. Initialization ===
+// Set initial provider toggle state
+Object.entries(TP.providerHasData).forEach(([provider, hasData]) => {
+    if (!hasData) {
+        const el = document.querySelector('.legend-item[data-provider="' + provider + '"]');
+        if (el) el.classList.add('off');
+    }
+});
+
+// Initialize date inputs
+const _si = document.getElementById('startDate');
+const _ei = document.getElementById('endDate');
+_si.value = TP.minDate; _si.min = TP.minDate; _si.max = TP.maxDate;
+_ei.value = TP.maxDate; _ei.min = TP.minDate; _ei.max = TP.maxDate;
+
+// Set generation timestamp
+setText('genTime', 'Generated ' + new Date().toLocaleString('en', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
+
+// Initial render
+if (RAW.length) {
+    updateDashboard();
+}
+</script>
+</body>
+</html>
