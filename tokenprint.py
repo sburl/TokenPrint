@@ -7,7 +7,7 @@ and Gemini CLI (OpenTelemetry logs), then generates an interactive HTML dashboar
 showing usage trends, costs, and estimated environmental impact.
 
 Usage:
-    python3 ai-impact-dashboard.py [--since YYYYMMDD] [--until YYYYMMDD] [--no-open] [--output PATH]
+    python3 tokenprint.py [--since YYYYMMDD] [--until YYYYMMDD] [--no-open] [--output PATH]
 """
 
 import argparse
@@ -249,11 +249,11 @@ def collect_gemini_data(since=None, until=None):
         print(f"  [skip] Could not read Gemini telemetry log: {e}", file=sys.stderr)
         return {}
 
-    # Estimate Gemini costs (Gemini 2.5 Pro pricing)
+    # Estimate Gemini costs (Gemini 2.5 Pro pricing, cached = 10% of input rate)
     for date, d in daily.items():
         input_cost = d["input_tokens"] * 1.25 / 1_000_000
         output_cost = d["output_tokens"] * 10.00 / 1_000_000
-        cached_cost = d["cache_read_tokens"] * 0.315 / 1_000_000
+        cached_cost = d["cache_read_tokens"] * 0.125 / 1_000_000
         d["cost"] = input_cost + output_cost + cached_cost
 
     return dict(daily)
@@ -442,7 +442,7 @@ def generate_html(data, output_path):
     est_output_cost = 0
     est_total_cost = 0
     for prov in ["claude", "codex", "gemini"]:
-        pt = {"claude": (3e-6, 15e-6, 0.30e-6), "codex": (0.69e-6, 2.76e-6, 0.17e-6), "gemini": (0.15e-6, 0.60e-6, 0.0375e-6)}
+        pt = {"claude": (3e-6, 15e-6, 0.30e-6), "codex": (0.69e-6, 2.76e-6, 0.17e-6), "gemini": (1.25e-6, 10.0e-6, 0.125e-6)}
         ri, ro, rc = pt[prov]
         p_out = sum(r[prov]["output_tokens"] for r in data) * ro
         p_inp = sum(r[prov]["input_tokens"] for r in data) * ri
@@ -900,7 +900,7 @@ def generate_html(data, output_path):
 <li><strong>Claude:</strong> Cost from ccusage (uses Anthropic's published API pricing per model)</li>
 <li><strong>Codex (gpt-5-codex):</strong> Cost from ccusage (uses OpenAI's published pricing)</li>
 <li><strong>Codex (gpt-5.3-codex):</strong> No official API pricing yet. Uses gpt-5-codex rates ($0.69/M input, $2.76/M output, $0.17/M cached)</li>
-<li><strong>Gemini:</strong> Estimated at $1.25/M input, $10.00/M output, $0.315/M cached (Gemini 2.5 Pro pricing)</li>
+<li><strong>Gemini:</strong> Estimated at $1.25/M input, $10.00/M output, $0.125/M cached (Gemini 2.5 Pro pricing; cached = 10% of input rate)</li>
 </ul>
 
 <h4>Energy Model</h4>
@@ -1331,7 +1331,7 @@ function updateDashboard() {{
 
   // Output: estimate actual output cost using known rates per provider
   // c=Claude[inp,out,cached], x=Codex, g=Gemini
-  const RATES = {{c:[3e-6,15e-6,0.30e-6], x:[0.69e-6,2.76e-6,0.17e-6], g:[0.15e-6,0.60e-6,0.0375e-6]}};
+  const RATES = {{c:[3e-6,15e-6,0.30e-6], x:[0.69e-6,2.76e-6,0.17e-6], g:[1.25e-6,10.0e-6,0.125e-6]}};
   let estOutCost = 0, estAllCost = 0;
   fd.forEach(row => {{
     [['c','claude',RATES.c],['x','codex',RATES.x],['g','gemini',RATES.g]].forEach(([k,p,r]) => {{
@@ -1714,10 +1714,15 @@ function generateShareImage() {{
   ctx.fillStyle = '#6366f1';
   ctx.fillText(tokDisplay + ' tokens', 48 + nameWidth + 18, 58);
 
-  // Date range + active days — muted subtitle
+  // Date range + active days + cost — muted subtitle
+  const costEl = document.getElementById('cardCostVal');
+  const costText = costEl ? costEl.textContent : '';
+  let subtitleParts = [prettyDate];
+  if (activeDays) subtitleParts.push(activeDays);
+  if (costText) subtitleParts.push(costText + ' API cost');
   ctx.font = '18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   ctx.fillStyle = '#64748b';
-  ctx.fillText(prettyDate + (activeDays ? '  \u00b7  ' + activeDays : ''), 50, 88);
+  ctx.fillText(subtitleParts.join('  \u00b7  '), 50, 88);
 
   // Subtle divider line
   ctx.strokeStyle = '#334155';
@@ -1884,7 +1889,7 @@ def main():
 
     output_path = args.output
     if not output_path:
-        output_path = os.path.join(tempfile.gettempdir(), "ai-usage-dashboard.html")
+        output_path = os.path.join(tempfile.gettempdir(), "tokenprint.html")
 
     generate_html(merged, output_path)
     print(f"Dashboard written to: {output_path}")
