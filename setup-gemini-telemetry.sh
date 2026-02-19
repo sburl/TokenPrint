@@ -18,52 +18,35 @@ mkdir -p "$GEMINI_DIR"
 
 # If settings.json doesn't exist, create it with telemetry config
 if [ ! -f "$SETTINGS_FILE" ]; then
-    cat > "$SETTINGS_FILE" << 'EOF'
-{
-  "telemetry": {
-    "enabled": true,
-    "exporters": {
-      "file": {
-        "enabled": true,
-        "path": "~/.gemini/telemetry.log"
-      }
-    }
-  }
-}
-EOF
-    echo "Created $SETTINGS_FILE with telemetry config."
-else
-    # Check if telemetry config already exists
-    if python3 -c "
+    python3 - "$SETTINGS_FILE" "$TELEMETRY_LOG" <<'PYEOF'
 import json, sys
-with open('$SETTINGS_FILE') as f:
-    data = json.load(f)
-tel = data.get('telemetry', {})
-exporters = tel.get('exporters', {})
-file_exp = exporters.get('file', {})
-if file_exp.get('enabled') and file_exp.get('path'):
-    sys.exit(0)
-sys.exit(1)
-" 2>/dev/null; then
-        echo "Telemetry already configured in $SETTINGS_FILE. No changes needed."
-    else
-        # Add telemetry config to existing settings
-        python3 -c "
-import json
-with open('$SETTINGS_FILE') as f:
-    data = json.load(f)
-data.setdefault('telemetry', {})
-data['telemetry']['enabled'] = True
-data['telemetry'].setdefault('exporters', {})
-data['telemetry']['exporters']['file'] = {
-    'enabled': True,
-    'path': '~/.gemini/telemetry.log'
-}
-with open('$SETTINGS_FILE', 'w') as f:
+settings_file, log_path = sys.argv[1], sys.argv[2]
+data = {"telemetry": {"enabled": True, "exporters": {"file": {"enabled": True, "path": log_path}}}}
+with open(settings_file, "w") as f:
     json.dump(data, f, indent=2)
-print('Updated $SETTINGS_FILE with telemetry config.')
-"
-    fi
+print(f"Created {settings_file} with telemetry config.")
+PYEOF
+else
+    # Check if telemetry config already exists, update if needed
+    python3 - "$SETTINGS_FILE" "$TELEMETRY_LOG" <<'PYEOF'
+import json, sys
+settings_file, log_path = sys.argv[1], sys.argv[2]
+with open(settings_file) as f:
+    data = json.load(f)
+tel = data.get("telemetry", {})
+exporters = tel.get("exporters", {})
+file_exp = exporters.get("file", {})
+if file_exp.get("enabled") and file_exp.get("path"):
+    print(f"Telemetry already configured in {settings_file}. No changes needed.")
+    sys.exit(0)
+data.setdefault("telemetry", {})
+data["telemetry"]["enabled"] = True
+data["telemetry"].setdefault("exporters", {})
+data["telemetry"]["exporters"]["file"] = {"enabled": True, "path": log_path}
+with open(settings_file, "w") as f:
+    json.dump(data, f, indent=2)
+print(f"Updated {settings_file} with telemetry config.")
+PYEOF
 fi
 
 # Touch the telemetry log so it exists

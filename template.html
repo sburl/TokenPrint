@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenPrint</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90' style='filter:grayscale(1) brightness(10)'>⚡</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" integrity="sha384-T/4KgSWuZEPozpPz7rnnp/5lDSnpY1VPJCojf1S81uTHS1E38qgLfMgVsAeRCWc4" crossorigin="anonymous"></script>
+<script>const TP = TOKENPRINT_DATA_PLACEHOLDER;</script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: #334155;
+    --text: #f1f5f9; --muted: #94a3b8; --accent: #6366f1;
+    --claude: #6366f1; --codex: #22c55e; --gemini: #f59e0b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.25rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; }
+  .card .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
+  .card .detail { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+  .chart-box { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; }
+  .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .chart-header h3 { font-size: 0.875rem; color: var(--muted); margin: 0; }
+  .toggle-btn { background: var(--accent); color: var(--text); border: none; border-radius: 0.375rem; padding: 0.25rem 0.625rem; font-size: 0.7rem; cursor: pointer; transition: all 0.15s; opacity: 0.8; }
+  .toggle-btn:hover { opacity: 1; }
+  .equiv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .equiv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem 1.25rem; display: flex; align-items: center; gap: 0.75rem; }
+  .equiv-card .emoji { font-size: 2rem; line-height: 1; flex-shrink: 0; }
+  .equiv-card .eq-content { flex: 1; }
+  .equiv-card .num { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+  .equiv-card .desc { color: var(--muted); font-size: 0.75rem; margin-top: 0.125rem; }
+  .legend { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 0.375rem; font-size: 0.8rem; color: var(--text); cursor: pointer; user-select: none; transition: opacity 0.15s; }
+  .legend-item.off { opacity: 0.35; }
+  .legend-item.off .legend-dot { background: var(--muted) !important; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .section-title { font-size: 1.1rem; margin: 2rem 0 1rem; color: var(--muted); }
+  .no-data { text-align: center; padding: 4rem 2rem; color: var(--muted); }
+  .token-summary { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
+  .date-range { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+  .date-range label { color: var(--muted); font-size: 0.8rem; }
+  .date-range input[type="date"] { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 0.375rem; padding: 0.375rem 0.5rem; font-size: 0.8rem; font-family: inherit; color-scheme: dark; }
+  .date-range input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); opacity: 0.6; }
+  .date-range input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+  .date-range button { background: var(--border); color: var(--muted); border: none; border-radius: 0.375rem; padding: 0.375rem 0.75rem; font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
+  .date-range button:hover { background: var(--accent); color: var(--text); }
+  .matrix-box { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 2rem; overflow-x: auto; }
+  .matrix-box h3 { font-size: 0.875rem; color: var(--muted); margin-bottom: 1rem; }
+  .cost-matrix { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .cost-matrix th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 1rem; text-align: right; border-bottom: 1px solid var(--border); }
+  .cost-matrix th:first-child { text-align: left; }
+  .cost-matrix td { padding: 0.5rem 1rem; text-align: right; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .cost-matrix .month-label { text-align: left; color: var(--muted); font-weight: 500; }
+  .cost-matrix .row-total { font-weight: 700; }
+  .cost-matrix .col-totals td { border-top: 2px solid var(--accent); font-weight: 700; border-bottom: none; }
+  .cost-matrix .col-totals .month-label { color: var(--text); }
+  .cost-matrix th.claude { color: var(--claude); }
+  .cost-matrix th.codex { color: var(--codex); }
+  .cost-matrix th.gemini { color: var(--gemini); }
+  .cost-matrix td.has-tip { cursor: help; position: relative; }
+  .cost-matrix td.has-tip:hover .tip { display: block; }
+  .tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #0f172a; border: 1px solid var(--accent); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.7rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }
+  .tip .tip-row { display: flex; justify-content: space-between; gap: 1rem; }
+  .tip .tip-label { color: var(--muted); }
+  .tip .tip-val { font-variant-numeric: tabular-nums; text-align: right; }
+  .assumptions { margin-top: 2rem; color: var(--muted); font-size: 0.8rem; }
+  .assumptions summary { cursor: pointer; color: var(--text); font-size: 0.9rem; padding: 0.75rem 0; }
+  .assumptions summary:hover { color: var(--accent); }
+  .assumptions-body { padding: 1rem 0; }
+  .assumptions-body h4 { color: var(--text); margin: 1rem 0 0.5rem; font-size: 0.85rem; }
+  .assumptions-body ul { padding-left: 1.25rem; }
+  .assumptions-body li { margin-bottom: 0.25rem; }
+  .assumptions-body table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; table-layout: fixed; }
+  .assumptions-body td { padding: 0.375rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; vertical-align: top; }
+  .assumptions-body td:first-child { color: var(--text); width: 35%; }
+  .assumptions-body td:nth-child(2) { width: 22%; font-variant-numeric: tabular-nums; }
+  .assumptions-body td:nth-child(3) { color: var(--muted); font-style: italic; width: 43%; }
+  .assumptions-body code { background: var(--surface); padding: 0.1rem 0.3rem; border-radius: 0.25rem; }
+</style>
+</head>
+<body>
+<h1><span style="font-size: 1.1em; filter: grayscale(1) brightness(10);">⚡</span> TokenPrint</h1>
+<p class="subtitle"><span id="dateRange"></span> &middot; <span id="genTime"></span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Refresh</button></p>
+<p class="token-summary" id="tokenSummary"></p>
+
+<div class="date-range">
+  <label>Range:</label>
+  <input type="date" id="startDate">
+  <span style="color: var(--muted); font-size: 0.8rem;">to</span>
+  <input type="date" id="endDate">
+  <button onclick="resetDates()">Reset</button>
+</div>
+
+<div class="legend">
+  <div class="legend-item" data-provider="claude" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--claude)"></div> Claude Code</div>
+  <div class="legend-item" data-provider="codex" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--codex)"></div> Codex CLI</div>
+  <div class="legend-item" data-provider="gemini" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--gemini)"></div> Gemini CLI</div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Total API Cost</div>
+    <div class="value" id="cardCostVal"></div>
+    <div class="detail" id="cardCostDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Total Tokens</div>
+    <div class="value" id="cardTokensVal"></div>
+    <div class="detail" id="cardTokensDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Input Tokens</div>
+    <div class="value" id="cardInputVal"></div>
+    <div class="detail" id="cardInputDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Output Tokens</div>
+    <div class="value" id="cardOutputVal"></div>
+    <div class="detail" id="cardOutputDetail"></div>
+  </div>
+</div>
+
+<div class="matrix-box">
+  <h3>Monthly Estimated API Cost by Provider</h3>
+  <table class="cost-matrix">
+    <thead id="matrixHead"><tr><th></th><th class="claude">Claude</th><th class="codex">Codex</th><th class="gemini">Gemini</th><th>Total</th></tr></thead>
+    <tbody id="matrixBody"></tbody>
+  </table>
+</div>
+
+<div class="charts">
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="costTitle">Daily Cost by Provider ($)</h3>
+      <button class="toggle-btn" onclick="toggleChart('cost')">Cumulative</button>
+    </div>
+    <canvas id="costChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="tokenTitle">Daily Token Use by Provider</h3>
+      <button class="toggle-btn" onclick="toggleChart('token')">Cumulative</button>
+    </div>
+    <canvas id="tokenChart"></canvas>
+  </div>
+</div>
+
+<h3 class="section-title">Environmental Impact</h3>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Energy Used</div>
+    <div class="value" id="cardEnergyVal"></div>
+    <div class="detail" id="cardEnergyDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">CO2 Emitted</div>
+    <div class="value" id="cardCarbonVal"></div>
+    <div class="detail" id="cardCarbonDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Water Used</div>
+    <div class="value" id="cardWaterVal"></div>
+    <div class="detail" id="cardWaterDetail"></div>
+  </div>
+  <div class="card">
+    <div class="label">Electricity Cost</div>
+    <div class="value" id="cardElecVal"></div>
+    <div class="detail" id="cardElecDetail"></div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="energyTitle">Daily Energy by Provider</h3>
+      <button class="toggle-btn" onclick="toggleChart('energy')">Cumulative</button>
+    </div>
+    <canvas id="energyChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <div class="chart-header">
+      <h3 id="carbonTitle">Daily CO2 Emissions</h3>
+      <button class="toggle-btn" onclick="toggleChart('carbon')">Cumulative</button>
+    </div>
+    <canvas id="carbonChart"></canvas>
+  </div>
+</div>
+
+<h3 class="section-title">Real-World Equivalents</h3>
+<div class="equiv">
+  <div class="equiv-card"><div class="emoji">🌯</div><div class="eq-content"><div class="num" id="eqBurrito"></div><div class="desc" id="eqBurritoDesc">Chipotle burritos of API cost (~$11.75 each)</div></div></div>
+  <div class="equiv-card"><div class="emoji">📖</div><div class="eq-content"><div class="num" id="eqBibles"></div><div class="desc" id="eqBiblesDesc">ft tall stack of Bibles (1 Bible ~ 1M tokens)</div></div></div>
+  <div class="equiv-card"><div class="emoji">🚘</div><div class="eq-content"><div class="num" id="eqTesla"></div><div class="desc" id="eqTeslaDesc">Tesla miles of energy (~0.25 kWh/mi)</div></div></div>
+  <div class="equiv-card"><div class="emoji">🚿</div><div class="eq-content"><div class="num" id="eqShowers"></div><div class="desc" id="eqShowersDesc">Showers of water used (~65 L each)</div></div></div>
+  <div class="equiv-card"><div class="emoji">✈️</div><div class="eq-content"><div class="num" id="eqFlights"></div><div class="desc" id="eqFlightsDesc">NYC-LA flights of CO2 (~90 kg each)</div></div></div>
+  <div class="equiv-card"><div class="emoji">🚗</div><div class="eq-content"><div class="num" id="eqCar"></div><div class="desc" id="eqCarDesc">Miles of CO2 in a gas car (25 mpg)</div></div></div>
+</div>
+
+<div style="text-align: center; margin: 1.5rem 0;">
+  <button onclick="generateShareImage()" style="background: var(--accent); color: var(--text); border: none; border-radius: 0.5rem; padding: 0.625rem 1.5rem; font-size: 0.95rem; cursor: pointer; font-family: inherit; transition: opacity 0.15s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">📸 Share My Impact</button>
+</div>
+
+<details class="assumptions">
+<summary>📋 Methodology & Assumptions</summary>
+<div class="assumptions-body">
+<h4>Data Sources</h4>
+<ul>
+<li><strong>Claude Code:</strong> <code>ccusage daily --json</code> — reads local JSONL logs from Claude Code sessions</li>
+<li><strong>Codex CLI:</strong> <code>npx @ccusage/codex@18 daily --json</code> — reads local Codex CLI session logs</li>
+<li><strong>Gemini CLI:</strong> OpenTelemetry file export at <code>~/.gemini/telemetry.log</code> (requires one-time setup). Only tracks sessions after telemetry is enabled.</li>
+</ul>
+
+<h4>Token Accounting (Caching)</h4>
+<p>Each provider reports cached tokens differently. TokenPrint normalizes all providers so that "input tokens" means <em>non-cached input only</em>, and "cached tokens" is separate. This prevents double-counting in energy/cost calculations.</p>
+<table>
+<tr><td>Claude (ccusage)</td><td><code>inputTokens</code> = non-cached only, <code>cacheReadTokens</code> = cached</td><td>No adjustment needed — fields are already separate</td></tr>
+<tr><td>Codex (@ccusage/codex)</td><td><code>inputTokens</code> <strong>includes</strong> cached, <code>cachedInputTokens</code> = cached</td><td>TokenPrint subtracts cached from input: <code>non_cached = inputTokens - cachedInputTokens</code></td></tr>
+<tr><td>Gemini (telemetry)</td><td><code>input_token_count</code> <strong>includes</strong> cached, <code>cached_content_token_count</code> = cached</td><td>Same adjustment: <code>non_cached = input_token_count - cached_content_token_count</code></td></tr>
+</table>
+
+<h4>Cost Estimates</h4>
+<ul>
+<li><strong>Claude:</strong> Cost from ccusage (uses Anthropic's published API pricing per model)</li>
+<li><strong>Codex (gpt-5-codex):</strong> Cost from ccusage (uses OpenAI's published pricing)</li>
+<li><strong>Codex (gpt-5.3-codex):</strong> No official API pricing yet. Uses gpt-5-codex rates ($0.69/M input, $2.76/M output, $0.17/M cached)</li>
+<li><strong>Gemini:</strong> Estimated at $1.25/M input, $10.00/M output, $0.125/M cached (Gemini 2.5 Pro pricing; cached = 10% of input rate)</li>
+</ul>
+
+<h4>Energy Model</h4>
+<table>
+<tr><td>Output tokens</td><td>0.001 Wh/token</td><td>Industry estimate for large language models. Consistent with IEA (2024) estimate of 2.9 Wh per ChatGPT query (~3,000 output tokens) and Luccioni et al. (2023) energy benchmarks for generative models.</td></tr>
+<tr><td>Input tokens</td><td>0.0002 Wh/token</td><td>~5x less compute than output (prefill vs autoregressive decode). Supported by de Vries (2023) analysis in Joule and Patterson et al. (2022) Google data center energy studies.</td></tr>
+<tr><td>Cached tokens</td><td>0.00005 Wh/token</td><td>~4x less than input — cache lookup avoids full prefill. Based on KV-cache architecture analysis and Anthropic prompt caching documentation.</td></tr>
+<tr><td>PUE (Power Usage Effectiveness)</td><td>1.2</td><td>Uptime Institute (2023) global average: 1.58; hyperscalers report 1.1–1.2. Google reported 1.10 fleet-wide (2023). 1.2 is a conservative hyperscale estimate.</td></tr>
+<tr><td>Grid transmission loss</td><td>5%</td><td>EIA (2024): US T&amp;D losses averaged ~5% of total generation. Lawrence Berkeley National Lab also estimates 4.7–5.5%.</td></tr>
+<tr><td>Electricity price</td><td>$0.13/kWh</td><td>EIA (2024): US average commercial electricity rate $0.1343/kWh. Large data centers may negotiate lower, but $0.13 is a reasonable average.</td></tr>
+</table>
+
+<h4>Carbon Model</h4>
+<table>
+<tr><td>Grid carbon intensity</td><td>390 gCO2e/kWh</td><td>EPA eGRID (2022): US national average 386.6 gCO2e/kWh. IEA (2023) reports US at ~390 gCO2e/kWh. Varies widely by region (50–800+).</td></tr>
+<tr><td>Embodied carbon</td><td>+20%</td><td>Gupta et al. (2022) "ACT": embodied carbon is 20–50% of server lifecycle emissions. Also consistent with Dell and HPE lifecycle assessments for GPU servers.</td></tr>
+</table>
+
+<h4>Water Model</h4>
+<table>
+<tr><td>Water Usage Effectiveness (WUE)</td><td>0.5 L/kWh</td><td>Google (2023 Environmental Report): fleet WUE 0.51 L/kWh. Li et al. (2023) "Making AI Less Thirsty" estimates 0.5–1.0 L/kWh for evaporative-cooled data centers.</td></tr>
+</table>
+
+<h4>Real-World Equivalents</h4>
+<table>
+<tr><td>US household electricity</td><td>~900 kg CO2/month</td><td>EPA average</td></tr>
+<tr><td>Gas car emissions</td><td>404 g CO2/mile</td><td>EPA average (25 mpg)</td></tr>
+<tr><td>NYC-LA flight</td><td>~90 kg CO2/passenger</td><td>Economy class, one way</td></tr>
+<tr><td>Tree offset</td><td>~22 kg CO2/year</td><td>Mature tree annual absorption</td></tr>
+<tr><td>Shower</td><td>~65 L water</td><td>8-minute average shower</td></tr>
+<tr><td>iPhone charge</td><td>~12.7 Wh</td><td>iPhone 15 battery capacity</td></tr>
+<tr><td>Tesla</td><td>~0.25 kWh/mile</td><td>Model 3 average efficiency</td></tr>
+<tr><td>US household electricity</td><td>~30 kWh/day</td><td>EIA average</td></tr>
+</table>
+
+<h4>Limitations</h4>
+<ul>
+<li>Energy per token is a rough industry estimate — actual consumption varies by model, hardware, and data center</li>
+<li>Carbon intensity varies significantly by region and time of day (renewables vs fossil)</li>
+<li>Codex gpt-5.3 pricing is estimated and will update when official pricing is available</li>
+<li>Gemini data only available from the point telemetry is enabled (no historical backfill)</li>
+<li>"Active days" counts only days with recorded usage, not calendar days</li>
+</ul>
+</div>
+</details>
+
+<script>
+// === 1. Config & Constants ===
+const RAW = TP.rawData;
+const GITHUB_USER = TP.githubUser;
+const PROVIDERS = ['claude', 'codex', 'gemini'];
+const PROVIDER_KEYS = ['c', 'x', 'g'];  // Compact keys in raw data: c=claude, x=codex, g=gemini
+const PROVIDER_COLORS = ['#6366f1', '#22c55e', '#f59e0b'];
+const PROVIDER_NAMES = ['Claude', 'Codex', 'Gemini'];
+// Energy model constants (must match Python tokenprint.py values)
+const ENERGY = {OUTPUT: 0.001, INPUT: 0.0002, CACHE: 0.00005, PUE: 1.2, GRID: 1.05};
+const CLIMATE = {INTENSITY: 390, EMBODIED: 1.2, WUE: 0.5, ELEC_COST: TP.electricityCostKwh};
+// Per-provider known rates: [input, output, cached] cost per token
+const PROVIDER_RATES = {c: [3e-6, 15e-6, 0.30e-6], x: [0.69e-6, 2.76e-6, 0.17e-6], g: [1.25e-6, 10.0e-6, 0.125e-6]};
+
+// === 2. Chart State ===
+const charts = {};
+const chartState = {};
+const chartConfigs = {};
+let currentLabels = [];
+
+// === 3. Base Chart Options ===
+const baseChartOpts = {
+  responsive: true,
+  plugins: {
+    legend: {
+      display: true,
+      labels: { color: '#94a3b8', boxWidth: 12, padding: 12, font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' }
+    }
+  },
+  scales: {
+    x: { ticks: { color: '#94a3b8', maxRotation: 45 }, grid: { color: '#1e293b' } },
+    y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+  }
+};
+const stackedChartOpts = JSON.parse(JSON.stringify(baseChartOpts));
+stackedChartOpts.scales.x.stacked = true;
+stackedChartOpts.scales.y.stacked = true;
+
+// === 4. Formatting & Calculation Functions ===
+// Each raw data row has: [inputTokens, outputTokens, cachedTokens, cost]
+function calcEnergy(input, output, cached) {
+  return (output * ENERGY.OUTPUT + input * ENERGY.INPUT + cached * ENERGY.CACHE) * ENERGY.PUE * ENERGY.GRID;
+}
+function calcCarbon(wh) { return (wh / 1000) * CLIMATE.INTENSITY * CLIMATE.EMBODIED; }
+function calcWater(wh) { return (wh / 1000) * CLIMATE.WUE * 1000; }
+
+function fmtCost(val) {
+  return val >= 1000 ? '$' + val.toLocaleString('en', {maximumFractionDigits: 0})
+    : val >= 0.01 ? '$' + val.toFixed(2) : '$' + val.toFixed(4);
+}
+function fmtTokens(val) {
+  if (val >= 1e9) { const v = val / 1e9; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' B'; }
+  if (val >= 1e6) { const v = val / 1e6; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' M'; }
+  if (val >= 1e3) { const v = val / 1e3; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' K'; }
+  return val.toLocaleString('en');
+}
+function fmtEnergy(wh) { return wh >= 1e6 ? (wh/1e6).toFixed(2)+' MWh' : wh >= 1e3 ? (wh/1e3).toFixed(2)+' kWh' : wh.toFixed(1)+' Wh'; }
+function fmtCarbon(g) { return g >= 1e6 ? (g/1e6).toFixed(2)+' tonnes' : g >= 1e3 ? (g/1e3).toFixed(2)+' kg' : g.toFixed(1)+' g'; }
+function fmtWater(ml) { return ml >= 1e6 ? (ml/1e6).toFixed(2)+' m\u00b3' : ml >= 1e3 ? (ml/1e3).toFixed(2)+' L' : ml.toFixed(0)+' mL'; }
+function fmtNum(val) { return val >= 10 ? val.toLocaleString('en', {maximumFractionDigits: 0}) : val >= 1 ? val.toFixed(1) : val.toFixed(2); }
+function fmtFixed(val, decimals) { return val.toLocaleString('en', {minimumFractionDigits: decimals, maximumFractionDigits: decimals}); }
+function setText(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
+
+// === 5. Provider Toggle ===
+function toggleProvider(el) {
+  el.classList.toggle('off');
+  updateDashboard();
+}
+function getActiveProviders() {
+  const active = [];
+  document.querySelectorAll('.legend-item').forEach(el => {
+    if (!el.classList.contains('off')) active.push(el.dataset.provider);
+  });
+  return active;
+}
+
+// === 6. Dashboard Section: Compute Totals ===
+function computeTotals(filtered, activeSet) {
+  const totals = {cost: 0, input: 0, output: 0, cached: 0, energy: 0, carbon: 0, water: 0};
+  const providerTotals = {
+    claude: {cost: 0, energy: 0, carbon: 0},
+    codex:  {cost: 0, energy: 0, carbon: 0},
+    gemini: {cost: 0, energy: 0, carbon: 0},
+  };
+  filtered.forEach(row => {
+    PROVIDER_KEYS.forEach((key, idx) => {
+      if (!activeSet.has(PROVIDERS[idx])) return;
+      const [input, output, cached, cost] = row[key];
+      const energy = calcEnergy(input, output, cached);
+      totals.cost += cost; totals.input += input; totals.output += output; totals.cached += cached;
+      totals.energy += energy; totals.carbon += calcCarbon(energy); totals.water += calcWater(energy);
+      const prov = PROVIDERS[idx];
+      providerTotals[prov].cost += cost;
+      providerTotals[prov].energy += energy;
+      providerTotals[prov].carbon += calcCarbon(energy);
+    });
+  });
+  return {totals, providerTotals, totalTokens: totals.input + totals.output + totals.cached};
+}
+
+// === 7. Dashboard Section: Update Header ===
+function updateHeader(dateLabels, totals, totalTokens) {
+  const n = dateLabels.length;
+  setText('dateRange', dateLabels[0] + ' to ' + dateLabels[n - 1] + ' (' + n + ' active days)');
+  setText('tokenSummary',
+    totalTokens.toLocaleString('en-US') + ' total tokens \u00b7 '
+    + totals.input.toLocaleString('en-US') + ' input \u00b7 '
+    + totals.output.toLocaleString('en-US') + ' output \u00b7 '
+    + totals.cached.toLocaleString('en-US') + ' cached');
+}
+
+// === 8. Dashboard Section: Update Cards ===
+function updateCards(filtered, totals, providerTotals, activeProviders, activeSet, totalTokens) {
+  const dayCount = filtered.length;
+
+  // Cost card
+  const costPerM = totalTokens > 0 ? totals.cost / (totalTokens / 1e6) : 0;
+  const costParts = [];
+  [['claude', 'Claude'], ['codex', 'Codex'], ['gemini', 'Gemini']].forEach(([key, name]) => {
+    if (activeSet.has(key)) {
+      const pct = totals.cost > 0 ? (providerTotals[key].cost / totals.cost * 100).toFixed(0) : 0;
+      costParts.push(name + ' ' + pct + '%');
+    }
+  });
+  setText('cardCostVal', fmtCost(totals.cost));
+  setText('cardCostDetail', fmtCost(costPerM) + '/M tokens \u00b7 ' + costParts.join(' \u00b7 '));
+
+  // Tokens card: daily avg + busiest day
+  let busiestVal = 0, busiestDate = '';
+  filtered.forEach(row => {
+    let dayTotal = 0;
+    PROVIDER_KEYS.forEach((key, idx) => {
+      if (activeSet.has(PROVIDERS[idx])) dayTotal += row[key][0] + row[key][1] + row[key][2];
+    });
+    if (dayTotal > busiestVal) { busiestVal = dayTotal; busiestDate = row.d; }
+  });
+  let busiestLabel = 'N/A';
+  if (busiestDate) {
+    const [y, m, d] = busiestDate.split('-').map(Number);
+    busiestLabel = new Date(y, m - 1, d).toLocaleDateString('en', {month: 'short', day: 'numeric'});
+  }
+  setText('cardTokensVal', fmtTokens(totalTokens));
+  setText('cardTokensDetail', fmtTokens(totalTokens / dayCount) + '/day avg \u00b7 busiest: ' + fmtTokens(busiestVal) + ' (' + busiestLabel + ')');
+
+  // Input card: cache hit rate + savings
+  const allInput = totals.input + totals.cached;
+  const cacheRate = allInput > 0 ? (totals.cached / allInput * 100).toFixed(0) : 0;
+  let cacheSavings = 0;
+  filtered.forEach(row => {
+    [['c', 'claude'], ['x', 'codex'], ['g', 'gemini']].forEach(([key, prov]) => {
+      if (!activeSet.has(prov)) return;
+      const cached = row[key][2];
+      const rates = PROVIDER_RATES[key];
+      cacheSavings += cached * (rates[0] - rates[2]);
+    });
+  });
+  setText('cardInputVal', fmtTokens(totals.input));
+  setText('cardInputDetail', cacheRate + '% cache hit rate \u00b7 ~' + fmtCost(cacheSavings) + ' saved by caching');
+
+  // Output card: estimated output cost share
+  let estOutputCost = 0, estTotalCost = 0;
+  filtered.forEach(row => {
+    [['c', 'claude', PROVIDER_RATES.c], ['x', 'codex', PROVIDER_RATES.x], ['g', 'gemini', PROVIDER_RATES.g]].forEach(([key, prov, rates]) => {
+      if (!activeSet.has(prov)) return;
+      const [input, output, cached] = row[key];
+      estOutputCost += output * rates[1];
+      estTotalCost += input * rates[0] + output * rates[1] + cached * rates[2];
+    });
+  });
+  const outputCostPct = estTotalCost > 0 ? (estOutputCost / estTotalCost * 100).toFixed(0) : 0;
+  const costPerMOutput = totals.output > 0 ? estOutputCost / (totals.output / 1e6) : 0;
+  setText('cardOutputVal', fmtTokens(totals.output));
+  setText('cardOutputDetail', '~' + outputCostPct + '% of est. cost \u00b7 ' + fmtCost(costPerMOutput) + '/M avg rate');
+
+  // Energy card
+  const elecCost = (totals.energy / 1000) * CLIMATE.ELEC_COST;
+  const elecPct = totals.cost > 0 ? (elecCost / totals.cost * 100) : 0;
+  const teslaMiles = (totals.energy / 1000) * 4;
+  const energyContext = teslaMiles >= 1
+    ? '~' + fmtFixed(teslaMiles, 1) + ' mi in a Tesla'
+    : '~' + fmtFixed(totals.energy / 12.7, 0) + ' iPhone charges';
+  setText('cardEnergyVal', fmtEnergy(totals.energy));
+  const energyParts = [];
+  activeProviders.forEach(p => {
+    if (providerTotals[p].energy > 0) energyParts.push(p.charAt(0).toUpperCase() + p.slice(1) + ' ' + fmtEnergy(providerTotals[p].energy));
+  });
+  setText('cardEnergyDetail', energyContext + (energyParts.length ? ' \u00b7 ' + energyParts.join(' \u00b7 ') : ''));
+
+  // Carbon card
+  setText('cardCarbonVal', fmtCarbon(totals.carbon));
+  const carbonParts = [];
+  activeProviders.forEach(p => {
+    if (providerTotals[p].carbon > 0) carbonParts.push(p.charAt(0).toUpperCase() + p.slice(1) + ' ' + fmtCarbon(providerTotals[p].carbon));
+  });
+  setText('cardCarbonDetail', carbonParts.join(' \u00b7 ') || 'No data');
+
+  // Water + electricity cards
+  setText('cardWaterVal', fmtWater(totals.water));
+  setText('cardWaterDetail', '~' + fmtNum(totals.water / 65000) + ' showers');
+  setText('cardElecVal', '$' + fmtFixed(elecCost, 2));
+  setText('cardElecDetail', fmtFixed(elecPct, 2) + '% of API cost');
+}
+
+// === 9. Dashboard Section: Update Equivalents ===
+function updateEquivalents(totals, totalTokens) {
+  const carbonKg = totals.carbon / 1000;
+  setText('eqTesla', fmtNum((totals.energy / 1000) * 4));
+  setText('eqFlights', fmtNum(carbonKg / 90));
+  setText('eqShowers', fmtNum(totals.water / 65000));
+  setText('eqBurrito', fmtNum(totals.cost / 11.75));
+  setText('eqBibles', fmtNum(totalTokens / 1044000 * 1.5 / 12));
+  setText('eqCar', fmtNum(carbonKg / 0.404));
+}
+
+// === 10. Dashboard Section: Update Matrix ===
+function updateMatrix(filtered, activeSet) {
+  // Determine which provider indices are active
+  const activeIndices = [];
+  PROVIDERS.forEach((p, i) => { if (activeSet.has(p)) activeIndices.push(i); });
+
+  // Accumulate monthly costs and token breakdowns
+  const monthlyCost = {};
+  const monthlyTokens = {};
+  filtered.forEach(row => {
+    const month = row.d.slice(0, 7);
+    if (!monthlyCost[month]) {
+      monthlyCost[month] = [0, 0, 0];
+      monthlyTokens[month] = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
+    }
+    activeIndices.forEach(i => {
+      monthlyCost[month][i] += row[PROVIDER_KEYS[i]][3];
+      monthlyTokens[month][i].input += row[PROVIDER_KEYS[i]][0];
+      monthlyTokens[month][i].output += row[PROVIDER_KEYS[i]][1];
+      monthlyTokens[month][i].cached += row[PROVIDER_KEYS[i]][2];
+    });
+  });
+
+  // Fill gaps between first and last month
+  const monthKeys = Object.keys(monthlyCost).sort();
+  if (monthKeys.length >= 2) {
+    let [year, month] = monthKeys[0].split('-').map(Number);
+    const [endYear, endMonth] = monthKeys[monthKeys.length - 1].split('-').map(Number);
+    while (year < endYear || (year === endYear && month <= endMonth)) {
+      const key = String(year) + '-' + String(month).padStart(2, '0');
+      if (!monthlyCost[key]) {
+        monthlyCost[key] = [0, 0, 0];
+        monthlyTokens[key] = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
+      }
+      month++;
+      if (month > 12) { month = 1; year++; }
+    }
+  }
+
+  const sortedMonths = Object.keys(monthlyCost).sort();
+  const columnTotals = [0, 0, 0];
+  const columnTokenTotals = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
+
+  // Rebuild header with only active providers (DOM construction — no innerHTML)
+  const matrixHead = document.getElementById('matrixHead');
+  matrixHead.textContent = '';
+  const headerRow = document.createElement('tr');
+  headerRow.appendChild(document.createElement('th'));
+  activeIndices.forEach(i => {
+    const th = document.createElement('th');
+    th.className = PROVIDERS[i];
+    th.textContent = PROVIDER_NAMES[i];
+    headerRow.appendChild(th);
+  });
+  const thTotal = document.createElement('th');
+  thTotal.textContent = 'Total';
+  headerRow.appendChild(thTotal);
+  matrixHead.appendChild(headerRow);
+
+  // Helper: create a cost cell with tooltip
+  function createCostCell(cost, tokens, cssClass) {
+    const td = document.createElement('td');
+    td.className = cssClass || 'has-tip';
+    td.textContent = '$' + fmtFixed(cost, 2);
+    const tip = document.createElement('div');
+    tip.className = 'tip';
+    [['Input', tokens.input], ['Output', tokens.output], ['Cached', tokens.cached]].forEach(([label, val]) => {
+      const row = document.createElement('div');
+      row.className = 'tip-row';
+      const lbl = document.createElement('span');
+      lbl.className = 'tip-label';
+      lbl.textContent = label;
+      const v = document.createElement('span');
+      v.className = 'tip-val';
+      v.textContent = val.toLocaleString('en');
+      row.appendChild(lbl);
+      row.appendChild(v);
+      tip.appendChild(row);
+    });
+    td.appendChild(tip);
+    return td;
+  }
+
+  // Build body rows
+  const matrixBody = document.getElementById('matrixBody');
+  matrixBody.textContent = '';
+  sortedMonths.forEach(month => {
+    const costs = monthlyCost[month];
+    const tokens = monthlyTokens[month];
+    let rowTotal = 0;
+    activeIndices.forEach(i => rowTotal += costs[i]);
+    activeIndices.forEach(i => {
+      columnTotals[i] += costs[i];
+      columnTokenTotals[i].input += tokens[i].input;
+      columnTokenTotals[i].output += tokens[i].output;
+      columnTokenTotals[i].cached += tokens[i].cached;
+    });
+    const tr = document.createElement('tr');
+    const labelTd = document.createElement('td');
+    labelTd.className = 'month-label';
+    labelTd.textContent = month;
+    tr.appendChild(labelTd);
+    activeIndices.forEach(i => tr.appendChild(createCostCell(costs[i], tokens[i])));
+    const totalTd = document.createElement('td');
+    totalTd.className = 'row-total';
+    totalTd.textContent = '$' + fmtFixed(rowTotal, 2);
+    tr.appendChild(totalTd);
+    matrixBody.appendChild(tr);
+  });
+
+  // Totals row
+  let grandTotal = 0;
+  activeIndices.forEach(i => grandTotal += columnTotals[i]);
+  const totalsRow = document.createElement('tr');
+  totalsRow.className = 'col-totals';
+  const totalsLabel = document.createElement('td');
+  totalsLabel.className = 'month-label';
+  totalsLabel.textContent = 'Total';
+  totalsRow.appendChild(totalsLabel);
+  activeIndices.forEach(i => totalsRow.appendChild(createCostCell(columnTotals[i], columnTokenTotals[i])));
+  const grandTotalTd = document.createElement('td');
+  grandTotalTd.className = 'row-total';
+  grandTotalTd.textContent = '$' + fmtFixed(grandTotal, 2);
+  totalsRow.appendChild(grandTotalTd);
+  matrixBody.appendChild(totalsRow);
+}
+
+// === 11. Dashboard Section: Update Charts ===
+function updateCharts(filtered, dateLabels, activeProviders, activeSet) {
+  // Compute per-provider daily series
+  const providerDaily = {};
+  PROVIDERS.forEach(p => { providerDaily[p] = {cost: [], tokens: [], energy: [], carbon: []}; });
+  const dailyCarbonTotals = [];
+
+  filtered.forEach(row => {
+    let dayCarbonTotal = 0;
+    PROVIDER_KEYS.forEach((key, idx) => {
+      if (!activeSet.has(PROVIDERS[idx])) return;
+      const [input, output, cached, cost] = row[key];
+      const energy = calcEnergy(input, output, cached);
+      const carbon = calcCarbon(energy);
+      providerDaily[PROVIDERS[idx]].cost.push(Math.round(cost * 100) / 100);
+      providerDaily[PROVIDERS[idx]].tokens.push(input + output + cached);
+      providerDaily[PROVIDERS[idx]].energy.push(energy);
+      providerDaily[PROVIDERS[idx]].carbon.push(carbon);
+      dayCarbonTotal += carbon;
+    });
+    dailyCarbonTotals.push(dayCarbonTotal);
+  });
+
+  // Auto-scale units based on max stacked values
+  const sumProviders = (metric, dayIdx) => activeProviders.reduce((sum, p) => sum + (providerDaily[p][metric][dayIdx] || 0), 0);
+  const maxEnergy = Math.max(...filtered.map((_, i) => sumProviders('energy', i)), 0);
+  const [energyDivisor, energyUnit] = maxEnergy >= 1e6 ? [1e6, 'MWh'] : maxEnergy >= 500 ? [1e3, 'kWh'] : [1, 'Wh'];
+  const maxCarbon = Math.max(...dailyCarbonTotals, 0);
+  const [carbonDivisor, carbonUnit] = maxCarbon >= 1e6 ? [1e6, 'tonnes'] : maxCarbon >= 500 ? [1e3, 'kg'] : [1, 'g'];
+  const maxTokens = Math.max(...filtered.map((_, i) => sumProviders('tokens', i)), 0);
+  const [tokenDivisor, tokenUnit] = maxTokens >= 1e9 ? [1e9, 'B tokens'] : maxTokens >= 1e6 ? [1e6, 'M tokens'] : maxTokens >= 1e3 ? [1e3, 'K tokens'] : [1, 'tokens'];
+
+  // Scale daily data and compute cumulative series
+  const scaledDaily = {};
+  const cumulative = {};
+  activeProviders.forEach(p => {
+    scaledDaily[p] = {
+      cost: providerDaily[p].cost,
+      tokens: providerDaily[p].tokens.map(v => Math.round(v / tokenDivisor * 100) / 100),
+      energy: providerDaily[p].energy.map(v => Math.round(v / energyDivisor * 10000) / 10000),
+      carbon: providerDaily[p].carbon.map(v => Math.round(v / carbonDivisor * 10000) / 10000),
+    };
+    cumulative[p] = {cost: [], tokens: [], energy: [], carbon: []};
+    let cumCost = 0, cumTokens = 0, cumEnergy = 0, cumCarbon = 0;
+    filtered.forEach((_, i) => {
+      cumCost += providerDaily[p].cost[i]; cumTokens += providerDaily[p].tokens[i];
+      cumEnergy += providerDaily[p].energy[i]; cumCarbon += providerDaily[p].carbon[i];
+      cumulative[p].cost.push(Math.round(cumCost * 100) / 100);
+      cumulative[p].tokens.push(Math.round(cumTokens / tokenDivisor * 100) / 100);
+      cumulative[p].energy.push(Math.round(cumEnergy / energyDivisor * 100) / 100);
+      cumulative[p].carbon.push(Math.round(cumCarbon / carbonDivisor * 100) / 100);
+    });
+  });
+
+  // Total cumulative (sum of all active providers)
+  const cumulativeTotal = {cost: [], tokens: [], energy: [], carbon: []};
+  filtered.forEach((_, i) => {
+    ['cost', 'tokens', 'energy', 'carbon'].forEach(metric => {
+      cumulativeTotal[metric].push(Math.round(activeProviders.reduce((sum, p) => sum + cumulative[p][metric][i], 0) * 100) / 100);
+    });
+  });
+
+  // Token formatting that accounts for the current divisor
+  function fmtTokenDisplay(scaledVal) {
+    const abs = Math.abs(scaledVal) * tokenDivisor;
+    if (abs >= 1e9) { const v = abs / 1e9; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' B tokens'; }
+    if (abs >= 1e6) { const v = abs / 1e6; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' M tokens'; }
+    if (abs >= 1e3) { const v = abs / 1e3; return (v >= 10 ? v.toFixed(0) : v.toFixed(2)) + ' K tokens'; }
+    return abs.toFixed(0) + ' tokens';
+  }
+
+  // Tooltip option builders
+  function makeDailyTooltipOpts(unit, isPrefix, extraFn) {
+    const opts = JSON.parse(JSON.stringify(stackedChartOpts));
+    const pre = isPrefix ? unit : '';
+    const suf = isPrefix ? '' : ' ' + unit;
+    opts.plugins.tooltip = {usePointStyle: true, callbacks: {
+      label: function(ctx) { return ' ' + ctx.dataset.label + ': ' + pre + fmtFixed(ctx.raw || 0, 2) + suf; },
+      footer: function(items) {
+        const total = items.reduce((s, item) => s + (item.raw || 0), 0);
+        const lines = ['Total: ' + pre + fmtFixed(total, 2) + suf];
+        if (extraFn) lines.push(extraFn(items, total));
+        return lines;
+      }
+    }};
+    return opts;
+  }
+  function makeCumTooltipOpts(unit, isPrefix, extraFn) {
+    const opts = JSON.parse(JSON.stringify(baseChartOpts));
+    opts.plugins.legend.labels.usePointStyle = true;
+    opts.plugins.legend.labels.pointStyle = 'circle';
+    opts.interaction = {mode: 'index', intersect: false};
+    const pre = isPrefix ? unit : '';
+    const suf = isPrefix ? '' : ' ' + unit;
+    opts.plugins.tooltip = {mode: 'index', intersect: false, usePointStyle: true, callbacks: {
+      label: function(ctx) { return ' ' + ctx.dataset.label + ': ' + pre + fmtFixed(ctx.raw || 0, 2) + suf; },
+      afterBody: function(items) {
+        const idx = items[0].dataIndex;
+        const total = items.reduce((s, item) => s + (item.raw || 0), 0);
+        const days = idx + 1, avg = total / days;
+        const lines = ['', 'Total: ' + pre + fmtFixed(total, 2) + suf, 'Daily avg: ' + pre + fmtFixed(avg, 2) + suf + ' over ' + days + ' days'];
+        if (extraFn) lines.push(extraFn(items, total, idx));
+        return lines;
+      }
+    }};
+    return opts;
+  }
+  function makeTokenTooltipOpts(isStacked) {
+    const opts = JSON.parse(JSON.stringify(isStacked ? stackedChartOpts : baseChartOpts));
+    if (!isStacked) {
+      opts.plugins.legend.labels.usePointStyle = true;
+      opts.plugins.legend.labels.pointStyle = 'circle';
+      opts.interaction = {mode: 'index', intersect: false};
+    }
+    const callbacks = {
+      label: function(ctx) { return ' ' + ctx.dataset.label + ': ' + fmtTokenDisplay(ctx.raw || 0); },
+    };
+    if (isStacked) {
+      callbacks.footer = function(items) {
+        return 'Total: ' + fmtTokenDisplay(items.reduce((s, i) => s + (i.raw || 0), 0));
+      };
+    } else {
+      callbacks.afterBody = function(items) {
+        const total = items.reduce((s, i) => s + (i.raw || 0), 0);
+        const days = items[0].dataIndex + 1;
+        return ['', 'Total: ' + fmtTokenDisplay(total), 'Daily avg: ' + fmtTokenDisplay(total / days) + ' over ' + days + ' days'];
+      };
+    }
+    opts.plugins.tooltip = Object.assign({usePointStyle: true}, isStacked ? {} : {mode: 'index', intersect: false}, {callbacks});
+    return opts;
+  }
+
+  // Build datasets for a given metric
+  function makeDatasets(metric, isBar) {
+    if (isBar) {
+      return activeProviders.map(p => {
+        const idx = PROVIDERS.indexOf(p);
+        return {label: PROVIDER_NAMES[idx], data: scaledDaily[p][metric], backgroundColor: PROVIDER_COLORS[idx]};
+      });
+    }
+    // Cumulative: dashed Total line, then per-provider
+    const lineStyle = {fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8};
+    const datasets = [{label: 'Total', data: cumulativeTotal[metric], borderColor: '#e2e8f0', backgroundColor: '#e2e8f0', borderDash: [5, 3], borderWidth: 2, ...lineStyle}];
+    activeProviders.forEach(p => {
+      const idx = PROVIDERS.indexOf(p);
+      datasets.push({label: PROVIDER_NAMES[idx], data: cumulative[p][metric], borderColor: PROVIDER_COLORS[idx], backgroundColor: PROVIDER_COLORS[idx], ...lineStyle});
+    });
+    return datasets;
+  }
+
+  // Energy/carbon tooltip extras
+  const energyExtra = (items, total) => 'Electricity: $' + fmtFixed(total * energyDivisor / 1000 * CLIMATE.ELEC_COST, 2) + ' (~' + fmtFixed(total * energyDivisor / 1000 * 4, 1) + ' mi in a Tesla)';
+  const carbonDailyExtra = (items) => '~' + fmtFixed(dailyCarbonTotals[items[0].dataIndex] / 1000 / 0.404, 2) + ' mi in a gas car (25 mpg)';
+  const carbonCumExtra = (items, total) => '~' + fmtFixed(total * carbonDivisor / 1000 / 0.404, 2) + ' mi in a gas car (25 mpg)';
+
+  // Register chart configs
+  chartConfigs.cost = {
+    canvas: 'costChart', titleEl: 'costTitle',
+    dailyTitle: 'Daily Cost by Provider ($)', cumTitle: 'Cumulative Cost by Provider ($)',
+    daily: {type: 'bar', datasets: makeDatasets('cost', true), options: makeDailyTooltipOpts('$', true, null)},
+    cum: {type: 'line', datasets: makeDatasets('cost', false), options: makeCumTooltipOpts('$', true, null)},
+  };
+  chartConfigs.token = {
+    canvas: 'tokenChart', titleEl: 'tokenTitle',
+    dailyTitle: 'Daily Token Use by Provider (' + tokenUnit + ')', cumTitle: 'Cumulative Tokens by Provider (' + tokenUnit + ')',
+    daily: {type: 'bar', datasets: makeDatasets('tokens', true), options: makeTokenTooltipOpts(true)},
+    cum: {type: 'line', datasets: makeDatasets('tokens', false), options: makeTokenTooltipOpts(false)},
+  };
+  chartConfigs.energy = {
+    canvas: 'energyChart', titleEl: 'energyTitle',
+    dailyTitle: 'Daily Energy by Provider (' + energyUnit + ')', cumTitle: 'Cumulative Energy (' + energyUnit + ')',
+    daily: {type: 'bar', datasets: makeDatasets('energy', true), options: makeDailyTooltipOpts(energyUnit, false, energyExtra)},
+    cum: {type: 'line', datasets: makeDatasets('energy', false), options: makeCumTooltipOpts(energyUnit, false, energyExtra)},
+  };
+  chartConfigs.carbon = {
+    canvas: 'carbonChart', titleEl: 'carbonTitle',
+    dailyTitle: 'Daily CO2 Emissions (' + carbonUnit + ')', cumTitle: 'Cumulative CO2 (' + carbonUnit + ')',
+    daily: {type: 'bar', datasets: makeDatasets('carbon', true), options: makeDailyTooltipOpts(carbonUnit, false, carbonDailyExtra)},
+    cum: {type: 'line', datasets: makeDatasets('carbon', false), options: makeCumTooltipOpts(carbonUnit, false, carbonCumExtra)},
+  };
+
+  // Render or re-render all charts
+  Object.keys(chartConfigs).forEach(key => {
+    if (!(key in chartState)) chartState[key] = 'daily';
+    const cfg = chartConfigs[key];
+    const mode = chartState[key] === 'cum' ? cfg.cum : cfg.daily;
+    if (charts[key]) charts[key].destroy();
+    charts[key] = new Chart(document.getElementById(cfg.canvas), {
+      type: mode.type, data: {labels: dateLabels, datasets: mode.datasets}, options: mode.options,
+    });
+    document.getElementById(cfg.titleEl).textContent = chartState[key] === 'cum' ? cfg.cumTitle : cfg.dailyTitle;
+  });
+}
+
+// === 12. Main Coordinator ===
+function updateDashboard() {
+  const startDate = document.getElementById('startDate').value;
+  const endDate = document.getElementById('endDate').value;
+  const filtered = RAW.filter(row => row.d >= startDate && row.d <= endDate);
+  if (!filtered.length) return;
+
+  const dateLabels = filtered.map(row => row.d);
+  currentLabels = dateLabels;
+  const activeProviders = getActiveProviders();
+  const activeSet = new Set(activeProviders);
+
+  const {totals, providerTotals, totalTokens} = computeTotals(filtered, activeSet);
+
+  updateHeader(dateLabels, totals, totalTokens);
+  updateCards(filtered, totals, providerTotals, activeProviders, activeSet, totalTokens);
+  updateEquivalents(totals, totalTokens);
+  updateMatrix(filtered, activeSet);
+  updateCharts(filtered, dateLabels, activeProviders, activeSet);
+}
+
+// === 13. Toggle Chart Mode ===
+function toggleChart(key) {
+  const cfg = chartConfigs[key];
+  const switchToCum = chartState[key] === 'daily';
+  chartState[key] = switchToCum ? 'cum' : 'daily';
+  const mode = switchToCum ? cfg.cum : cfg.daily;
+
+  charts[key].destroy();
+  charts[key] = new Chart(document.getElementById(cfg.canvas), {
+    type: mode.type,
+    data: {labels: currentLabels, datasets: mode.datasets},
+    options: mode.options,
+  });
+
+  document.getElementById(cfg.titleEl).textContent = switchToCum ? cfg.cumTitle : cfg.dailyTitle;
+  const btn = document.getElementById(cfg.titleEl).parentElement.querySelector('.toggle-btn');
+  btn.textContent = switchToCum ? 'Daily' : 'Cumulative';
+}
+
+// === 14. Event Handlers ===
+document.getElementById('startDate').addEventListener('change', updateDashboard);
+document.getElementById('endDate').addEventListener('change', updateDashboard);
+document.getElementById('updateBtn').addEventListener('click', function() {
+  this.textContent = 'Refreshing...';
+  this.style.opacity = '0.5';
+  setTimeout(() => window.location.reload(), 200);
+});
+function resetDates() {
+  if (!RAW.length) return;
+  document.getElementById('startDate').value = RAW[0].d;
+  document.getElementById('endDate').value = RAW[RAW.length - 1].d;
+  updateDashboard();
+}
+
+// === 15. Share Image ===
+function drawRoundedRect(ctx, x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  let curY = y;
+  for (let i = 0; i < words.length; i++) {
+    const test = line + words[i] + ' ';
+    if (ctx.measureText(test).width > maxWidth && i > 0) {
+      ctx.fillText(line.trim(), x, curY);
+      line = words[i] + ' ';
+      curY += lineHeight;
+    } else {
+      line = test;
+    }
+  }
+  ctx.fillText(line.trim(), x, curY);
+  return curY;
+}
+
+function generateShareImage() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 630;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 1200, 630);
+
+  // Read live DOM values
+  const dateRange = document.getElementById('dateRange').textContent;
+  const tokenSummary = document.getElementById('tokenSummary').textContent;
+  const totalTokensMatch = tokenSummary.match(/^([\d,]+)/);
+  const totalTokens = totalTokensMatch ? totalTokensMatch[1] : '0';
+
+  // Format token count for header
+  const tokNum = parseInt(totalTokens.replace(/,/g, ''), 10) || 0;
+  let tokDisplay;
+  if (tokNum >= 1e9) { const v = tokNum/1e9; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'B'; }
+  else if (tokNum >= 1e6) { const v = tokNum/1e6; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'M'; }
+  else if (tokNum >= 1e3) { const v = tokNum/1e3; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'K'; }
+  else { tokDisplay = tokNum.toLocaleString(); }
+
+  // Parse date range into pretty format: "Jan 15 - Feb 18, 2026"
+  const drMatch = dateRange.match(/(\d{4})-(\d{2})-(\d{2})\s+to\s+(\d{4})-(\d{2})-(\d{2})\s*\((\d+)/);
+  let prettyDate = dateRange;
+  let activeDays = '';
+  if (drMatch) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const m1 = months[parseInt(drMatch[2],10)-1], d1 = parseInt(drMatch[3],10);
+    const m2 = months[parseInt(drMatch[5],10)-1], d2 = parseInt(drMatch[6],10);
+    const y2 = drMatch[4];
+    prettyDate = m1 + ' ' + d1 + ' \u2013 ' + m2 + ' ' + d2 + ', ' + y2;
+    activeDays = drMatch[7] + ' active days';
+  }
+
+  // --- Header block: name + token count (large), date subtitle ---
+  ctx.textAlign = 'left';
+
+  // Name
+  ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#f1f5f9';
+  const displayName = '@' + GITHUB_USER;
+  ctx.fillText(displayName, 48, 58);
+
+  // Token count badge next to name
+  const nameWidth = ctx.measureText(displayName).width;
+  ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#6366f1';
+  ctx.fillText(tokDisplay + ' tokens', 48 + nameWidth + 18, 58);
+
+  // Date range + active days + cost — muted subtitle
+  const costEl = document.getElementById('cardCostVal');
+  const costText = costEl ? costEl.textContent : '';
+  let subtitleParts = [prettyDate];
+  if (activeDays) subtitleParts.push(activeDays);
+  if (costText) subtitleParts.push(costText + ' API cost');
+  ctx.font = '18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(subtitleParts.join('  \u00b7  '), 50, 88);
+
+  // Subtle divider line
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(48, 104);
+  ctx.lineTo(1152, 104);
+  ctx.stroke();
+
+  // Card data from DOM
+  const shareCards = [
+    { emoji: '\ud83c\udf2f', id: 'eqBurrito', descId: 'eqBurritoDesc' },
+    { emoji: '\ud83d\udcd6', id: 'eqBibles', descId: 'eqBiblesDesc' },
+    { emoji: '\ud83d\ude98', id: 'eqTesla', descId: 'eqTeslaDesc' },
+    { emoji: '\ud83d\ude97', id: 'eqCar', descId: 'eqCarDesc' },
+    { emoji: '\u2708\ufe0f', id: 'eqFlights', descId: 'eqFlightsDesc' },
+    { emoji: '\ud83d\udebf', id: 'eqShowers', descId: 'eqShowersDesc' },
+  ];
+
+  // Grid layout: 2 rows x 3 cols
+  const gridX = 40, gridY = 118;
+  const cardW = 365, cardH = 210, gapX = 14, gapY = 14;
+
+  shareCards.forEach((card, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = gridX + col * (cardW + gapX);
+    const y = gridY + row * (cardH + gapY);
+
+    // Card background
+    drawRoundedRect(ctx, x, y, cardW, cardH, 12, '#1e293b', '#334155');
+
+    // Emoji
+    ctx.font = '48px serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillText(card.emoji, x + 20, y + 68);
+
+    // Number (accent color)
+    const numEl = document.getElementById(card.id);
+    const numText = numEl ? numEl.textContent : '0';
+    ctx.font = 'bold 44px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#6366f1';
+    ctx.textAlign = 'left';
+    ctx.fillText(numText, x + 85, y + 68);
+
+    // Description
+    const descEl = document.getElementById(card.descId);
+    const descText = descEl ? descEl.textContent : '';
+    ctx.font = '14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'left';
+    wrapText(ctx, descText, x + 20, y + 115, cardW - 40, 20);
+  });
+
+  // Footer — no box, just subtle text, right-aligned
+  ctx.font = '20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.textAlign = 'right';
+  ctx.fillText('github.com/sburl/TokenPrint', 1165, 618);
+
+  showSharePreview(canvas);
+}
+
+function showSharePreview(canvas) {
+  // Remove existing modal if any
+  const existing = document.getElementById('shareModal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'shareModal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1.5rem;max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center;gap:1rem;';
+
+  const img = document.createElement('img');
+  img.src = canvas.toDataURL('image/png');
+  img.style.cssText = 'max-width:100%;max-height:60vh;border-radius:0.5rem;';
+  modal.appendChild(img);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;';
+
+  // Download button
+  const dlBtn = document.createElement('button');
+  dlBtn.textContent = 'Download PNG';
+  dlBtn.style.cssText = 'background:#6366f1;color:#f1f5f9;border:none;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  dlBtn.addEventListener('click', function() {
+    const a = document.createElement('a');
+    a.download = 'tokenprint-' + GITHUB_USER + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  });
+  btnRow.appendChild(dlBtn);
+
+  // Copy button
+  const cpBtn = document.createElement('button');
+  cpBtn.textContent = 'Copy to Clipboard';
+  cpBtn.style.cssText = 'background:#334155;color:#f1f5f9;border:1px solid #475569;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  cpBtn.addEventListener('click', function() {
+    canvas.toBlob(function(blob) {
+      if (!blob) { cpBtn.textContent = 'Failed'; return; }
+      try {
+        navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+          .then(function() { cpBtn.textContent = 'Copied!'; setTimeout(function() { cpBtn.textContent = 'Copy to Clipboard'; }, 2000); })
+          .catch(function() { cpBtn.textContent = 'Copy failed (try Download)'; });
+      } catch (err) {
+        cpBtn.textContent = 'Copy not supported (try Download)';
+      }
+    }, 'image/png');
+  });
+  btnRow.appendChild(cpBtn);
+
+  // Close button
+  const clBtn = document.createElement('button');
+  clBtn.textContent = 'Close';
+  clBtn.style.cssText = 'background:transparent;color:#94a3b8;border:1px solid #475569;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  clBtn.addEventListener('click', function() { overlay.remove(); });
+  btnRow.appendChild(clBtn);
+
+  modal.appendChild(btnRow);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+// === 16. Initialization ===
+// Set initial provider toggle state
+Object.entries(TP.providerHasData).forEach(([provider, hasData]) => {
+    if (!hasData) {
+        const el = document.querySelector('.legend-item[data-provider="' + provider + '"]');
+        if (el) el.classList.add('off');
+    }
+});
+
+// Initialize date inputs
+const _si = document.getElementById('startDate');
+const _ei = document.getElementById('endDate');
+_si.value = TP.minDate; _si.min = TP.minDate; _si.max = TP.maxDate;
+_ei.value = TP.maxDate; _ei.min = TP.minDate; _ei.max = TP.maxDate;
+
+// Set generation timestamp (from Python generation time, not browser open time)
+setText('genTime', 'Generated ' + TP.generatedAt);
+
+// Initial render
+if (RAW.length) {
+    updateDashboard();
+}
+</script>
+</body>
+</html>

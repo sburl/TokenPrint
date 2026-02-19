@@ -56,7 +56,7 @@ The default output is `/tmp/tokenprint.html` — a fixed path so you can re-run 
 | Provider | Source | Install |
 |----------|--------|---------|
 | Claude Code | `ccusage daily --json` | `npm i -g ccusage` |
-| Codex CLI | `npx @ccusage/codex@latest daily --json` | None (runs via npx) |
+| Codex CLI | `npx @ccusage/codex@18 daily --json` | None (runs via npx) |
 | Gemini CLI | `~/.gemini/telemetry.log` | One-time setup (see below) |
 
 ### Gemini CLI Setup (Optional)

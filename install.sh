@@ -30,7 +30,7 @@ if command -v ccusage &>/dev/null; then
     echo "[ok] ccusage already installed: $(ccusage --version 2>&1 || echo 'installed')"
 else
     echo "Installing ccusage..."
-    npm install -g ccusage
+    npm install -g ccusage@18
     echo "[ok] ccusage installed"
 fi
 
@@ -39,7 +39,7 @@ echo ""
 echo "--- Codex CLI (@ccusage/codex) ---"
 # @ccusage/codex runs via npx, so just verify it's reachable
 echo "Verifying @ccusage/codex is accessible via npx..."
-if npx @ccusage/codex@latest --help &>/dev/null 2>&1; then
+if npx @ccusage/codex@18 --help &>/dev/null 2>&1; then
     echo "[ok] @ccusage/codex accessible via npx"
 else
     echo "[warn] @ccusage/codex may not be available. It runs via npx and requires Codex CLI usage logs to exist."
@@ -48,53 +48,12 @@ fi
 # --- 5. Setup Gemini CLI telemetry ---
 echo ""
 echo "--- Gemini CLI (telemetry) ---"
-GEMINI_DIR="$HOME/.gemini"
-SETTINGS_FILE="$GEMINI_DIR/settings.json"
-TELEMETRY_LOG="$GEMINI_DIR/telemetry.log"
-
-mkdir -p "$GEMINI_DIR"
-
-if [ ! -f "$SETTINGS_FILE" ]; then
-    cat > "$SETTINGS_FILE" << 'GEMEOF'
-{
-  "telemetry": {
-    "enabled": true,
-    "exporters": {
-      "file": {
-        "enabled": true,
-        "path": "~/.gemini/telemetry.log"
-      }
-    }
-  }
-}
-GEMEOF
-    echo "[ok] Created $SETTINGS_FILE with telemetry config"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/setup-gemini-telemetry.sh" ]; then
+    bash "$SCRIPT_DIR/setup-gemini-telemetry.sh"
 else
-    if python3 -c "
-import json, sys
-with open('$SETTINGS_FILE') as f:
-    data = json.load(f)
-tel = data.get('telemetry', {})
-exp = tel.get('exporters', {}).get('file', {})
-sys.exit(0 if exp.get('enabled') and exp.get('path') else 1)
-" 2>/dev/null; then
-        echo "[ok] Gemini telemetry already configured"
-    else
-        python3 -c "
-import json
-with open('$SETTINGS_FILE') as f:
-    data = json.load(f)
-data.setdefault('telemetry', {})
-data['telemetry']['enabled'] = True
-data['telemetry'].setdefault('exporters', {})
-data['telemetry']['exporters']['file'] = {'enabled': True, 'path': '~/.gemini/telemetry.log'}
-with open('$SETTINGS_FILE', 'w') as f:
-    json.dump(data, f, indent=2)
-"
-        echo "[ok] Updated $SETTINGS_FILE with telemetry config"
-    fi
+    echo "[warn] setup-gemini-telemetry.sh not found. Skipping Gemini setup."
 fi
-touch "$TELEMETRY_LOG"
 
 # --- 6. Verify GitHub CLI (optional, for share image username) ---
 echo ""
