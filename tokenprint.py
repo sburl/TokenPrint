@@ -46,6 +46,23 @@ def run_command(cmd, timeout=60):
         return None
 
 
+def detect_github_username():
+    """Detect GitHub username from gh CLI or git config, prompt if neither available."""
+    username = run_command("gh api user --jq .login", timeout=5)
+    if username:
+        return username
+    username = run_command("git config user.name", timeout=5)
+    if username:
+        return username
+    try:
+        username = input("Enter your name (for share image): ").strip()
+        if username:
+            return username
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return "dev"
+
+
 def collect_claude_data(since=None, until=None):
     """Collect Claude Code usage via ccusage."""
     cmd = "ccusage daily --json"
@@ -54,7 +71,7 @@ def collect_claude_data(since=None, until=None):
     if until:
         cmd += f" --until {until}"
 
-    output = run_command(cmd, timeout=30)
+    output = run_command(cmd, timeout=120)
     if not output:
         print("  [skip] ccusage not available or returned no data", file=sys.stderr)
         return {}
@@ -130,38 +147,28 @@ def collect_codex_data(since=None, until=None):
         date = _parse_date_flexible(raw_date)
         if not date:
             continue
-        input_tok = entry.get("inputTokens", 0) or 0
+        raw_input = entry.get("inputTokens", 0) or 0
         output_tok = entry.get("outputTokens", 0) or 0
         cached_tok = entry.get("cachedInputTokens", 0) or 0
+        # Codex inputTokens includes cached — subtract to get non-cached input
+        input_tok = max(0, raw_input - cached_tok)
         cost = entry.get("costUSD", 0) or 0
         entries.append((date, input_tok, output_tok, cached_tok, cost))
         if cost > 0:
-            non_cached = max(0, input_tok - cached_tok)
-            priced_input += non_cached
+            priced_input += input_tok
             priced_output += output_tok
             priced_cached += cached_tok
             priced_cost += cost
 
-    # Derive per-token-type rates from priced gpt-5-codex days.
-    # Standard API pricing ratio: output ~4x input, cached ~0.25x input.
-    # Solve: cost = non_cached_input * r + output * 4r + cached * 0.25r
-    if priced_input + priced_output > 0:
-        weighted = priced_input + priced_output * 4 + priced_cached * 0.25
-        r = priced_cost / weighted if weighted > 0 else 0.05e-6
-        rate_input = r
-        rate_output = r * 4
-        rate_cached = r * 0.25
-    else:
-        # Fallback if no priced days at all
-        rate_input = 0.15e-6
-        rate_output = 0.60e-6
-        rate_cached = 0.0375e-6
+    # Use gpt-5-codex pricing for all unpriced days (including gpt-5.3-codex)
+    rate_input = 0.69e-6    # $0.69/M input tokens
+    rate_output = 2.76e-6   # $2.76/M output tokens
+    rate_cached = 0.17e-6   # $0.17/M cached tokens
 
     daily = {}
     for date, input_tok, output_tok, cached_tok, cost in entries:
         if not cost and (input_tok or output_tok):
-            non_cached = max(0, input_tok - cached_tok)
-            cost = non_cached * rate_input + output_tok * rate_output + cached_tok * rate_cached
+            cost = input_tok * rate_input + output_tok * rate_output + cached_tok * rate_cached
         daily[date] = {
             "provider": "codex",
             "input_tokens": input_tok,
@@ -228,9 +235,11 @@ def collect_gemini_data(since=None, until=None):
                         attrs_dict[key] = val
                     attrs = attrs_dict
 
-                input_tok = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
+                raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
                 output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))
                 cached_tok = _safe_int(attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0)))
+                # Gemini input_token_count includes cached — subtract to get non-cached input
+                input_tok = max(0, raw_input - cached_tok)
 
                 if input_tok or output_tok:
                     daily[date]["input_tokens"] += input_tok
@@ -313,6 +322,8 @@ def merge_data(claude_data, codex_data, gemini_data):
 
 def generate_html(data, output_path):
     """Generate the self-contained HTML dashboard."""
+    github_username = detect_github_username()
+
     # Calculate totals
     totals = {
         "cost": 0, "energy_wh": 0, "carbon_g": 0, "water_ml": 0,
@@ -664,6 +675,7 @@ def generate_html(data, output_path):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TokenPrint</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90' style='filter:grayscale(1) brightness(10)'>⚡</text></svg>">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   :root {{
@@ -861,6 +873,10 @@ def generate_html(data, output_path):
   <div class="equiv-card"><div class="emoji">🚗</div><div class="eq-content"><div class="num" id="eqCar">{fmt_num(car_miles)}</div><div class="desc" id="eqCarDesc">Miles of CO2 in a gas car (25 mpg)</div></div></div>
 </div>
 
+<div style="text-align: center; margin: 1.5rem 0;">
+  <button onclick="generateShareImage()" style="background: var(--accent); color: var(--text); border: none; border-radius: 0.5rem; padding: 0.625rem 1.5rem; font-size: 0.95rem; cursor: pointer; font-family: inherit; transition: opacity 0.15s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">📸 Share My Impact</button>
+</div>
+
 <details class="assumptions">
 <summary>📋 Methodology & Assumptions</summary>
 <div class="assumptions-body">
@@ -871,11 +887,19 @@ def generate_html(data, output_path):
 <li><strong>Gemini CLI:</strong> OpenTelemetry file export at <code>~/.gemini/telemetry.log</code> (requires one-time setup). Only tracks sessions after telemetry is enabled.</li>
 </ul>
 
+<h4>Token Accounting (Caching)</h4>
+<p>Each provider reports cached tokens differently. TokenPrint normalizes all providers so that "input tokens" means <em>non-cached input only</em>, and "cached tokens" is separate. This prevents double-counting in energy/cost calculations.</p>
+<table>
+<tr><td>Claude (ccusage)</td><td><code>inputTokens</code> = non-cached only, <code>cacheReadTokens</code> = cached</td><td>No adjustment needed — fields are already separate</td></tr>
+<tr><td>Codex (@ccusage/codex)</td><td><code>inputTokens</code> <strong>includes</strong> cached, <code>cachedInputTokens</code> = cached</td><td>TokenPrint subtracts cached from input: <code>non_cached = inputTokens - cachedInputTokens</code></td></tr>
+<tr><td>Gemini (telemetry)</td><td><code>input_token_count</code> <strong>includes</strong> cached, <code>cached_content_token_count</code> = cached</td><td>Same adjustment: <code>non_cached = input_token_count - cached_content_token_count</code></td></tr>
+</table>
+
 <h4>Cost Estimates</h4>
 <ul>
 <li><strong>Claude:</strong> Cost from ccusage (uses Anthropic's published API pricing per model)</li>
 <li><strong>Codex (gpt-5-codex):</strong> Cost from ccusage (uses OpenAI's published pricing)</li>
-<li><strong>Codex (gpt-5.3-codex):</strong> No official API pricing yet. Estimated using per-token-type rates (input, output, cached) derived from gpt-5-codex priced days with standard 4:1 output:input ratio</li>
+<li><strong>Codex (gpt-5.3-codex):</strong> No official API pricing yet. Uses gpt-5-codex rates ($0.69/M input, $2.76/M output, $0.17/M cached)</li>
 <li><strong>Gemini:</strong> Estimated at $1.25/M input, $10.00/M output, $0.315/M cached (Gemini 2.5 Pro pricing)</li>
 </ul>
 
@@ -926,6 +950,7 @@ def generate_html(data, output_path):
 
 <script>
 const dates = {dates_json};
+const GITHUB_USER = '{github_username}';
 // Carbon equivalents for energy tooltip
 const dailyCarbonG = {daily_carbon_json};
 const carbonDivisor = {carbon_divisor};
@@ -1601,6 +1626,224 @@ function resetDates() {{
 }}
 // Initial render: rebuild table/cards with correct provider visibility
 updateDashboard();
+
+// --- Share Image ---
+function drawRoundedRect(ctx, x, y, w, h, r, fill, stroke) {{
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) {{ ctx.fillStyle = fill; ctx.fill(); }}
+  if (stroke) {{ ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }}
+}}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {{
+  const words = text.split(' ');
+  let line = '';
+  let curY = y;
+  for (let i = 0; i < words.length; i++) {{
+    const test = line + words[i] + ' ';
+    if (ctx.measureText(test).width > maxWidth && i > 0) {{
+      ctx.fillText(line.trim(), x, curY);
+      line = words[i] + ' ';
+      curY += lineHeight;
+    }} else {{
+      line = test;
+    }}
+  }}
+  ctx.fillText(line.trim(), x, curY);
+  return curY;
+}}
+
+function generateShareImage() {{
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 630;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 1200, 630);
+
+  // Read live DOM values
+  const dateRange = document.getElementById('dateRange').textContent;
+  const tokenSummary = document.getElementById('tokenSummary').textContent;
+  const totalTokensMatch = tokenSummary.match(/^([\\d,]+)/);
+  const totalTokens = totalTokensMatch ? totalTokensMatch[1] : '0';
+
+  // Format token count for header
+  const tokNum = parseInt(totalTokens.replace(/,/g, ''), 10) || 0;
+  let tokDisplay;
+  if (tokNum >= 1e9) {{ const v = tokNum/1e9; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'B'; }}
+  else if (tokNum >= 1e6) {{ const v = tokNum/1e6; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'M'; }}
+  else if (tokNum >= 1e3) {{ const v = tokNum/1e3; tokDisplay = (v>=10?v.toFixed(0):v.toFixed(1))+'K'; }}
+  else {{ tokDisplay = tokNum.toLocaleString(); }}
+
+  // Parse date range into pretty format: "Jan 15 - Feb 18, 2026"
+  const drMatch = dateRange.match(/(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+to\\s+(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s*\\((\\d+)/);
+  let prettyDate = dateRange;
+  let activeDays = '';
+  if (drMatch) {{
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const m1 = months[parseInt(drMatch[2],10)-1], d1 = parseInt(drMatch[3],10);
+    const m2 = months[parseInt(drMatch[5],10)-1], d2 = parseInt(drMatch[6],10);
+    const y2 = drMatch[4];
+    prettyDate = m1 + ' ' + d1 + ' \u2013 ' + m2 + ' ' + d2 + ', ' + y2;
+    activeDays = drMatch[7] + ' active days';
+  }}
+
+  // --- Header block: name + token count (large), date subtitle ---
+  ctx.textAlign = 'left';
+
+  // Name
+  ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#f1f5f9';
+  const displayName = '@' + GITHUB_USER;
+  ctx.fillText(displayName, 48, 58);
+
+  // Token count badge next to name
+  const nameWidth = ctx.measureText(displayName).width;
+  ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#6366f1';
+  ctx.fillText(tokDisplay + ' tokens', 48 + nameWidth + 18, 58);
+
+  // Date range + active days — muted subtitle
+  ctx.font = '18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(prettyDate + (activeDays ? '  \u00b7  ' + activeDays : ''), 50, 88);
+
+  // Subtle divider line
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(48, 104);
+  ctx.lineTo(1152, 104);
+  ctx.stroke();
+
+  // Card data from DOM
+  const cards = [
+    {{ emoji: '🌯', id: 'eqBurrito', descId: 'eqBurritoDesc' }},
+    {{ emoji: '📖', id: 'eqBibles', descId: 'eqBiblesDesc' }},
+    {{ emoji: '🚘', id: 'eqTesla', descId: 'eqTeslaDesc' }},
+    {{ emoji: '🚗', id: 'eqCar', descId: 'eqCarDesc' }},
+    {{ emoji: '✈️', id: 'eqFlights', descId: 'eqFlightsDesc' }},
+    {{ emoji: '🚿', id: 'eqShowers', descId: 'eqShowersDesc' }},
+  ];
+
+  // Grid layout: 2 rows x 3 cols
+  const gridX = 40, gridY = 118;
+  const cardW = 365, cardH = 210, gapX = 14, gapY = 14;
+
+  cards.forEach((card, i) => {{
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = gridX + col * (cardW + gapX);
+    const y = gridY + row * (cardH + gapY);
+
+    // Card background
+    drawRoundedRect(ctx, x, y, cardW, cardH, 12, '#1e293b', '#334155');
+
+    // Emoji
+    ctx.font = '48px serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillText(card.emoji, x + 20, y + 68);
+
+    // Number (accent color)
+    const numEl = document.getElementById(card.id);
+    const numText = numEl ? numEl.textContent : '0';
+    ctx.font = 'bold 44px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#6366f1';
+    ctx.textAlign = 'left';
+    ctx.fillText(numText, x + 85, y + 68);
+
+    // Description
+    const descEl = document.getElementById(card.descId);
+    const descText = descEl ? descEl.textContent : '';
+    ctx.font = '14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'left';
+    wrapText(ctx, descText, x + 20, y + 115, cardW - 40, 20);
+  }});
+
+  // Footer — no box, just subtle text, right-aligned
+  ctx.font = '20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.textAlign = 'right';
+  ctx.fillText('github.com/sburl/TokenPrint', 1165, 618);
+
+  showSharePreview(canvas);
+}}
+
+function showSharePreview(canvas) {{
+  // Remove existing modal if any
+  const existing = document.getElementById('shareModal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'shareModal';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.addEventListener('click', function(e) {{ if (e.target === overlay) overlay.remove(); }});
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1.5rem;max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center;gap:1rem;';
+
+  const img = document.createElement('img');
+  img.src = canvas.toDataURL('image/png');
+  img.style.cssText = 'max-width:100%;max-height:60vh;border-radius:0.5rem;';
+  modal.appendChild(img);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;';
+
+  // Download button
+  const dlBtn = document.createElement('button');
+  dlBtn.textContent = 'Download PNG';
+  dlBtn.style.cssText = 'background:#6366f1;color:#f1f5f9;border:none;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  dlBtn.addEventListener('click', function() {{
+    const a = document.createElement('a');
+    a.download = 'tokenprint-' + GITHUB_USER + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  }});
+  btnRow.appendChild(dlBtn);
+
+  // Copy button
+  const cpBtn = document.createElement('button');
+  cpBtn.textContent = 'Copy to Clipboard';
+  cpBtn.style.cssText = 'background:#334155;color:#f1f5f9;border:1px solid #475569;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  cpBtn.addEventListener('click', function() {{
+    canvas.toBlob(function(blob) {{
+      if (!blob) {{ cpBtn.textContent = 'Failed'; return; }}
+      try {{
+        navigator.clipboard.write([new ClipboardItem({{'image/png': blob}})])
+          .then(function() {{ cpBtn.textContent = 'Copied!'; setTimeout(function() {{ cpBtn.textContent = 'Copy to Clipboard'; }}, 2000); }})
+          .catch(function() {{ cpBtn.textContent = 'Copy failed (try Download)'; }});
+      }} catch (err) {{
+        cpBtn.textContent = 'Copy not supported (try Download)';
+      }}
+    }}, 'image/png');
+  }});
+  btnRow.appendChild(cpBtn);
+
+  // Close button
+  const clBtn = document.createElement('button');
+  clBtn.textContent = 'Close';
+  clBtn.style.cssText = 'background:transparent;color:#94a3b8;border:1px solid #475569;border-radius:0.5rem;padding:0.5rem 1.25rem;font-size:0.9rem;cursor:pointer;font-family:inherit;';
+  clBtn.addEventListener('click', function() {{ overlay.remove(); }});
+  btnRow.appendChild(clBtn);
+
+  modal.appendChild(btnRow);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}}
 </script>
 </body>
 </html>"""
