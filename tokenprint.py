@@ -380,7 +380,7 @@ def generate_html(data, output_path):
     config = compute_dashboard_data(data)
     config_json = _json_dumps_html_safe(config)
 
-    template_path = Path(__file__).parent / "template.html"
+    template_path = Path(__file__).resolve().parent / "template.html"
     with open(template_path) as f:
         template = f.read()
 
