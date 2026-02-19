@@ -11,8 +11,10 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -117,6 +119,7 @@ def _parse_date_flexible(date_str):
 
 def collect_codex_data(since=None, until=None):
     """Collect Codex CLI usage via @ccusage/codex."""
+    # TODO: pin to specific version for supply chain safety (e.g. @ccusage/codex@0.5.2)
     cmd = ["npx", "@ccusage/codex@latest", "daily", "--json"]
     if since:
         cmd.extend(["--since", since])
@@ -137,9 +140,8 @@ def collect_codex_data(since=None, until=None):
     # @ccusage/codex wraps data in {"daily": [...]}
     data = raw.get("daily", raw) if isinstance(raw, dict) else raw
 
-    # First pass: collect all entries and derive per-token-type rates from priced days
+    # First pass: collect all entries
     entries = []
-    priced_input, priced_output, priced_cached, priced_cost = 0, 0, 0, 0
     for entry in data:
         raw_date = entry.get("date", "")
         if not raw_date:
@@ -154,11 +156,6 @@ def collect_codex_data(since=None, until=None):
         input_tok = max(0, raw_input - cached_tok)
         cost = entry.get("costUSD", 0) or 0
         entries.append((date, input_tok, output_tok, cached_tok, cost))
-        if cost > 0:
-            priced_input += input_tok
-            priced_output += output_tok
-            priced_cached += cached_tok
-            priced_cost += cost
 
     # Use gpt-5-codex pricing for all unpriced days (including gpt-5.3-codex)
     rate_input = 0.69e-6    # $0.69/M input tokens
@@ -245,8 +242,8 @@ def collect_gemini_data(since=None, until=None):
                     daily[date]["input_tokens"] += input_tok
                     daily[date]["output_tokens"] += output_tok
                     daily[date]["cache_read_tokens"] += cached_tok
-    except (OSError, PermissionError) as e:
-        print(f"  [skip] Could not read Gemini telemetry log: {e}", file=sys.stderr)
+    except (OSError, PermissionError):
+        print("  [skip] Could not read Gemini telemetry log (permission or I/O error)", file=sys.stderr)
         return {}
 
     # Estimate Gemini costs (Gemini 2.5 Pro pricing, cached = 10% of input rate)
@@ -318,6 +315,11 @@ def merge_data(claude_data, codex_data, gemini_data):
                 }
         merged.append(row)
     return merged
+
+
+def _json_dumps_html_safe(value):
+    """json.dumps with HTML-safe escaping for embedding in <script> blocks."""
+    return json.dumps(value).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def generate_html(data, output_path):
@@ -423,7 +425,8 @@ def generate_html(data, output_path):
                          + r["codex"]["input_tokens"] + r["codex"]["output_tokens"] + r["codex"]["cache_read_tokens"]
                          + r["gemini"]["input_tokens"] + r["gemini"]["output_tokens"] + r["gemini"]["cache_read_tokens"]) for r in data]
         busiest = max(daily_totals, key=lambda x: x[1])
-        busiest_date = datetime.strptime(busiest[0], "%Y-%m-%d").strftime("%b %d").lstrip("0")
+        dt = datetime.strptime(busiest[0], "%Y-%m-%d")
+        busiest_date = f"{dt.strftime('%b')} {dt.day}"
         busiest_tokens = busiest[1]
     else:
         busiest_date = "N/A"
@@ -605,9 +608,9 @@ def generate_html(data, output_path):
         rcc += row["claude"]["cost"]
         rcxc += row["codex"]["cost"]
         rgmc += row["gemini"]["cost"]
-        rct += _provider_daily_tokens(row, "claude") * token_divisor
-        rcx += _provider_daily_tokens(row, "codex") * token_divisor
-        rgm += _provider_daily_tokens(row, "gemini") * token_divisor
+        rct += row["claude"]["input_tokens"] + row["claude"]["output_tokens"] + row["claude"]["cache_read_tokens"]
+        rcx += row["codex"]["input_tokens"] + row["codex"]["output_tokens"] + row["codex"]["cache_read_tokens"]
+        rgm += row["gemini"]["input_tokens"] + row["gemini"]["output_tokens"] + row["gemini"]["cache_read_tokens"]
         rce += row["claude"]["energy_wh"]
         rcxe += row["codex"]["energy_wh"]
         rgme += row["gemini"]["energy_wh"]
@@ -948,7 +951,7 @@ def generate_html(data, output_path):
 
 <script>
 const dates = {dates_json};
-const GITHUB_USER = {json.dumps(github_username)};
+const GITHUB_USER = {_json_dumps_html_safe(github_username)};
 // Carbon equivalents for energy tooltip
 const dailyCarbonG = {daily_carbon_json};
 const carbonDivisor = {carbon_divisor};
@@ -1242,7 +1245,7 @@ function enabledProviders() {{
 function cE(i,o,c) {{ return (o*EN.OUT + i*EN.IN + c*EN.CACHE) * EN.PUE * EN.GRID; }}
 function cC(wh) {{ return (wh/1000) * CN.INT * CN.EMB; }}
 function cW(wh) {{ return (wh/1000) * CN.WUE * 1000; }}
-function fC(v) {{ return v >= 1000 ? '$'+v.toLocaleString('en',{{maximumFractionDigits:0}}) : v >= 1 ? '$'+v.toFixed(2) : '$'+v.toFixed(4); }}
+function fC(v) {{ return v >= 1000 ? '$'+v.toLocaleString('en',{{maximumFractionDigits:0}}) : v >= 0.01 ? '$'+v.toFixed(2) : '$'+v.toFixed(4); }}
 function fT(v) {{
   if (v >= 1e9) {{ const u=v/1e9; return (u>=10?u.toFixed(0):u.toFixed(2))+' B'; }}
   if (v >= 1e6) {{ const u=v/1e6; return (u>=10?u.toFixed(0):u.toFixed(2))+' M'; }}
@@ -1257,9 +1260,9 @@ function fFix(v,d) {{ return v.toLocaleString('en',{{minimumFractionDigits:d,max
 function setText(id, t) {{ const el = document.getElementById(id); if (el) el.textContent = t; }}
 
 function tipH(t) {{
-  return '<div class="tip"><div class="tip-row"><span class="tip-label">Input</span><span class="tip-val">'+t.i.toLocaleString()+'</span></div>'
-    +'<div class="tip-row"><span class="tip-label">Output</span><span class="tip-val">'+t.o.toLocaleString()+'</span></div>'
-    +'<div class="tip-row"><span class="tip-label">Cached</span><span class="tip-val">'+t.c.toLocaleString()+'</span></div></div>';
+  return '<div class="tip"><div class="tip-row"><span class="tip-label">Input</span><span class="tip-val">'+t.i.toLocaleString('en')+'</span></div>'
+    +'<div class="tip-row"><span class="tip-label">Output</span><span class="tip-val">'+t.o.toLocaleString('en')+'</span></div>'
+    +'<div class="tip-row"><span class="tip-label">Cached</span><span class="tip-val">'+t.c.toLocaleString('en')+'</span></div></div>';
 }}
 
 function updateDashboard() {{
@@ -1315,8 +1318,12 @@ function updateDashboard() {{
     PKEYS.forEach((k,i) => {{ if (epSet.has(PROVS[i])) dt += row[k][0]+row[k][1]+row[k][2]; }});
     if (dt > busiestVal) {{ busiestVal = dt; busiestDate = row.d; }}
   }});
-  const bDateObj = new Date(busiestDate+'T00:00:00');
-  const bDateStr = bDateObj.toLocaleDateString('en',{{month:'short',day:'numeric'}});
+  let bDateStr = 'N/A';
+  if (busiestDate) {{
+    const parts = busiestDate.split('-');
+    const bDateObj = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    bDateStr = bDateObj.toLocaleDateString('en',{{month:'short',day:'numeric'}});
+  }}
   setText('cardTokensVal', fT(tTok));
   setText('cardTokensDetail', fT(tTok/n)+'/day avg \u00b7 busiest: '+fT(busiestVal)+' ('+bDateStr+')');
 
@@ -1618,6 +1625,7 @@ document.getElementById('updateBtn').addEventListener('click', function() {{
   setTimeout(() => window.location.reload(), 200);
 }});
 function resetDates() {{
+  if (!RAW.length) return;
   document.getElementById('startDate').value = RAW[0].d;
   document.getElementById('endDate').value = RAW[RAW.length-1].d;
   updateDashboard();
@@ -1856,7 +1864,6 @@ function showSharePreview(canvas) {{
 
 
 def main():
-    import re
     parser = argparse.ArgumentParser(description="Generate AI usage & impact dashboard")
     parser.add_argument("--since", help="Start date (YYYYMMDD)")
     parser.add_argument("--until", help="End date (YYYYMMDD)")
@@ -1864,10 +1871,15 @@ def main():
     parser.add_argument("--output", help="Output HTML path")
     args = parser.parse_args()
 
-    # Validate date arguments
+    # Validate date arguments (syntax + calendar validity)
     for name, val in [("since", args.since), ("until", args.until)]:
-        if val and not re.match(r"^\d{8}$", val):
-            parser.error(f"--{name} must be YYYYMMDD format (got: {val})")
+        if val:
+            if not re.match(r"^\d{8}$", val):
+                parser.error(f"--{name} must be YYYYMMDD format (got: {val})")
+            try:
+                datetime.strptime(val, "%Y%m%d")
+            except ValueError:
+                parser.error(f"--{name} is not a valid date (got: {val})")
 
     print("Collecting AI usage data...")
 
