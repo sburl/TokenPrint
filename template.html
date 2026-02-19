@@ -339,14 +339,6 @@ function fmtNum(val) { return val >= 10 ? val.toLocaleString('en', {maximumFract
 function fmtFixed(val, decimals) { return val.toLocaleString('en', {minimumFractionDigits: decimals, maximumFractionDigits: decimals}); }
 function setText(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
 
-function tooltipHtml(tokens) {
-  return '<div class="tip">'
-    + '<div class="tip-row"><span class="tip-label">Input</span><span class="tip-val">' + tokens.input.toLocaleString('en') + '</span></div>'
-    + '<div class="tip-row"><span class="tip-label">Output</span><span class="tip-val">' + tokens.output.toLocaleString('en') + '</span></div>'
-    + '<div class="tip-row"><span class="tip-label">Cached</span><span class="tip-val">' + tokens.cached.toLocaleString('en') + '</span></div>'
-    + '</div>';
-}
-
 // === 5. Provider Toggle ===
 function toggleProvider(el) {
   el.classList.toggle('off');
