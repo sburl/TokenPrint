@@ -1112,8 +1112,8 @@ const _ei = document.getElementById('endDate');
 _si.value = TP.minDate; _si.min = TP.minDate; _si.max = TP.maxDate;
 _ei.value = TP.maxDate; _ei.min = TP.minDate; _ei.max = TP.maxDate;
 
-// Set generation timestamp
-setText('genTime', 'Generated ' + new Date().toLocaleString('en', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
+// Set generation timestamp (from Python generation time, not browser open time)
+setText('genTime', 'Generated ' + TP.generatedAt);
 
 // Initial render
 if (RAW.length) {

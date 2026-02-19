@@ -371,6 +371,7 @@ def compute_dashboard_data(data):
         "minDate": min_date,
         "maxDate": max_date,
         "electricityCostKwh": ELECTRICITY_COST_KWH,
+        "generatedAt": datetime.now().strftime("%m/%d/%Y, %I:%M %p"),
     }
 
 

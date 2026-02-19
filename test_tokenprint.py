@@ -232,6 +232,7 @@ class TestComputeDashboardData:
         assert "minDate" in config
         assert "maxDate" in config
         assert "electricityCostKwh" in config
+        assert "generatedAt" in config
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_github_user(self, mock_user):
