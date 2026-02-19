@@ -75,15 +75,15 @@ TokenPrint estimates environmental impact using industry averages:
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| Energy per output token | 0.001 Wh | Industry estimate |
-| Energy per input token | 0.0002 Wh | Industry estimate |
-| Energy per cached token | 0.00005 Wh | Industry estimate |
-| PUE (data center overhead) | 1.2x | Industry average |
-| Embodied carbon | +20% | Lifecycle estimate |
-| Grid transmission loss | 6% | US average |
-| Carbon intensity | 390 gCO2e/kWh | US grid average |
-| Water usage efficiency | 0.5 L/kWh | Industry average |
-| Electricity price | $0.12/kWh | US commercial average |
+| Energy per output token | 0.001 Wh | IEA (2024), Luccioni et al. (2023) |
+| Energy per input token | 0.0002 Wh | de Vries (2023), Patterson et al. (2022) |
+| Energy per cached token | 0.00005 Wh | KV-cache architecture analysis |
+| PUE (data center overhead) | 1.2x | Uptime Institute (2023), Google (2023) |
+| Embodied carbon | +20% | Gupta et al. (2022) "ACT" |
+| Grid transmission loss | 5% | EIA (2024), LBNL |
+| Carbon intensity | 390 gCO2e/kWh | EPA eGRID (2022), IEA (2023) |
+| Water usage efficiency | 0.5 L/kWh | Google (2023), Li et al. (2023) |
+| Electricity price | $0.13/kWh | EIA (2024) US commercial average |
 
 These are rough estimates. Actual impact varies by model, hardware, data center location, time of day, and renewable energy mix. The dashboard includes a full methodology section with all assumptions.
 

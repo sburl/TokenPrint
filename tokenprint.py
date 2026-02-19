@@ -27,10 +27,10 @@ ENERGY_PER_INPUT_TOKEN_WH = 0.0002
 ENERGY_PER_CACHED_TOKEN_WH = 0.00005
 PUE = 1.2                    # Power Usage Effectiveness (data center overhead)
 EMBODIED_CARBON_FACTOR = 1.2  # +20% for hardware manufacturing
-GRID_LOSS_FACTOR = 1.06       # 6% transmission losses
+GRID_LOSS_FACTOR = 1.05       # 5% transmission losses (EIA)
 CARBON_INTENSITY = 390        # gCO2e per kWh (US average)
 WATER_USE_EFFICIENCY = 0.5    # liters per kWh
-ELECTRICITY_COST_KWH = 0.12  # USD per kWh (US average)
+ELECTRICITY_COST_KWH = 0.13  # USD per kWh (EIA commercial average)
 
 
 def run_command(cmd, timeout=60):
@@ -881,23 +881,23 @@ def generate_html(data, output_path):
 
 <h4>Energy Model</h4>
 <table>
-<tr><td>Output tokens</td><td>0.001 Wh/token</td><td>Industry estimate for large language models</td></tr>
-<tr><td>Input tokens</td><td>0.0002 Wh/token</td><td>~5x less compute than output</td></tr>
-<tr><td>Cached tokens</td><td>0.00005 Wh/token</td><td>~4x less than input (cache lookup)</td></tr>
-<tr><td>PUE (Power Usage Effectiveness)</td><td>1.2</td><td>Typical hyperscale data center overhead (cooling, networking)</td></tr>
-<tr><td>Grid transmission loss</td><td>6%</td><td>US average grid losses from plant to data center</td></tr>
-<tr><td>Electricity price</td><td>$0.12/kWh</td><td>US average commercial rate</td></tr>
+<tr><td>Output tokens</td><td>0.001 Wh/token</td><td>Industry estimate for large language models. Consistent with IEA (2024) estimate of 2.9 Wh per ChatGPT query (~3,000 output tokens) and Luccioni et al. (2023) energy benchmarks for generative models.</td></tr>
+<tr><td>Input tokens</td><td>0.0002 Wh/token</td><td>~5x less compute than output (prefill vs autoregressive decode). Supported by de Vries (2023) analysis in Joule and Patterson et al. (2022) Google data center energy studies.</td></tr>
+<tr><td>Cached tokens</td><td>0.00005 Wh/token</td><td>~4x less than input — cache lookup avoids full prefill. Based on KV-cache architecture analysis and Anthropic prompt caching documentation.</td></tr>
+<tr><td>PUE (Power Usage Effectiveness)</td><td>1.2</td><td>Uptime Institute (2023) global average: 1.58; hyperscalers report 1.1–1.2. Google reported 1.10 fleet-wide (2023). 1.2 is a conservative hyperscale estimate.</td></tr>
+<tr><td>Grid transmission loss</td><td>5%</td><td>EIA (2024): US T&amp;D losses averaged ~5% of total generation. Lawrence Berkeley National Lab also estimates 4.7–5.5%.</td></tr>
+<tr><td>Electricity price</td><td>$0.13/kWh</td><td>EIA (2024): US average commercial electricity rate $0.1343/kWh. Large data centers may negotiate lower, but $0.13 is a reasonable average.</td></tr>
 </table>
 
 <h4>Carbon Model</h4>
 <table>
-<tr><td>Grid carbon intensity</td><td>390 gCO2e/kWh</td><td>US average grid mix (EIA)</td></tr>
-<tr><td>Embodied carbon</td><td>+20%</td><td>Hardware manufacturing, shipping, end-of-life</td></tr>
+<tr><td>Grid carbon intensity</td><td>390 gCO2e/kWh</td><td>EPA eGRID (2022): US national average 386.6 gCO2e/kWh. IEA (2023) reports US at ~390 gCO2e/kWh. Varies widely by region (50–800+).</td></tr>
+<tr><td>Embodied carbon</td><td>+20%</td><td>Gupta et al. (2022) "ACT": embodied carbon is 20–50% of server lifecycle emissions. Also consistent with Dell and HPE lifecycle assessments for GPU servers.</td></tr>
 </table>
 
 <h4>Water Model</h4>
 <table>
-<tr><td>Water Usage Effectiveness (WUE)</td><td>0.5 L/kWh</td><td>Typical evaporative cooling in data centers</td></tr>
+<tr><td>Water Usage Effectiveness (WUE)</td><td>0.5 L/kWh</td><td>Google (2023 Environmental Report): fleet WUE 0.51 L/kWh. Li et al. (2023) "Making AI Less Thirsty" estimates 0.5–1.0 L/kWh for evaporative-cooled data centers.</td></tr>
 </table>
 
 <h4>Real-World Equivalents</h4>
@@ -1201,7 +1201,7 @@ const PROVS = ['claude', 'codex', 'gemini'];
 const PKEYS = ['c', 'x', 'g'];
 const PCOLORS = ['#6366f1', '#22c55e', '#f59e0b'];
 const PNAMES = ['Claude', 'Codex', 'Gemini'];
-const EN = {{OUT: 0.001, IN: 0.0002, CACHE: 0.00005, PUE: 1.2, GRID: 1.06}};
+const EN = {{OUT: 0.001, IN: 0.0002, CACHE: 0.00005, PUE: 1.2, GRID: 1.05}};
 const CN = {{INT: 390, EMB: 1.2, WUE: 0.5, ELEC: {ELECTRICITY_COST_KWH}}};
 
 // Provider toggle
