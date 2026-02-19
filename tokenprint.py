@@ -414,19 +414,20 @@ def generate_html(data, output_path):
     _all_tokens = totals["input_tokens"] + totals["output_tokens"] + totals["cache_read_tokens"]
     output_pct = (totals["output_tokens"] / _all_tokens * 100) if _all_tokens else 0
 
-    # Cost: per-M-token rate + provider percentages
+    # Cost: per-M-token rate
     cost_per_m = (totals["cost"] / (_all_tokens / 1e6)) if _all_tokens else 0
-    claude_pct = (provider_cost["claude"] / totals["cost"] * 100) if totals["cost"] else 0
-    codex_pct = (provider_cost["codex"] / totals["cost"] * 100) if totals["cost"] else 0
-    gemini_pct = (provider_cost["gemini"] / totals["cost"] * 100) if totals["cost"] else 0
 
     # Tokens: busiest day
-    daily_totals = [(r["date"], r["claude"]["input_tokens"] + r["claude"]["output_tokens"] + r["claude"]["cache_read_tokens"]
-                     + r["codex"]["input_tokens"] + r["codex"]["output_tokens"] + r["codex"]["cache_read_tokens"]
-                     + r["gemini"]["input_tokens"] + r["gemini"]["output_tokens"] + r["gemini"]["cache_read_tokens"]) for r in data]
-    busiest = max(daily_totals, key=lambda x: x[1])
-    busiest_date = datetime.strptime(busiest[0], "%Y-%m-%d").strftime("%b %-d")
-    busiest_tokens = busiest[1]
+    if data:
+        daily_totals = [(r["date"], r["claude"]["input_tokens"] + r["claude"]["output_tokens"] + r["claude"]["cache_read_tokens"]
+                         + r["codex"]["input_tokens"] + r["codex"]["output_tokens"] + r["codex"]["cache_read_tokens"]
+                         + r["gemini"]["input_tokens"] + r["gemini"]["output_tokens"] + r["gemini"]["cache_read_tokens"]) for r in data]
+        busiest = max(daily_totals, key=lambda x: x[1])
+        busiest_date = datetime.strptime(busiest[0], "%Y-%m-%d").strftime("%b %d").lstrip("0")
+        busiest_tokens = busiest[1]
+    else:
+        busiest_date = "N/A"
+        busiest_tokens = 0
 
     # Input: estimated cache savings
     # If all cached tokens were charged at non-cached input rates instead
@@ -454,17 +455,14 @@ def generate_html(data, output_path):
 
     # Equivalents
     carbon_kg = totals["carbon_g"] / 1000
-    household_months = carbon_kg / 900
     car_miles = carbon_kg / 0.404
     flights_pct = carbon_kg / 90
-    trees_needed = carbon_kg / 22
     showers = totals["water_ml"] / 65000
     iphone_charges = totals["energy_wh"] / 12.7
 
     # Real-world context for cards (pick best scale)
     energy_kwh = totals["energy_wh"] / 1000
     tesla_miles = energy_kwh / 0.25  # Tesla ~0.25 kWh/mile
-    us_home_days = energy_kwh / 30  # US home ~30 kWh/day
     if tesla_miles >= 1:
         energy_context = f"~{fmt_num(tesla_miles)} mi in a Tesla"
     else:
@@ -827,7 +825,7 @@ def generate_html(data, output_path):
   <div class="card">
     <div class="label">Energy Used</div>
     <div class="value" id="cardEnergyVal">{energy_display}</div>
-    <div class="detail" id="cardEnergyDetail">{energy_context} · Claude {fmt_energy(provider_energy["claude"])} · Codex {fmt_energy(provider_energy["codex"])}</div>
+    <div class="detail" id="cardEnergyDetail">{energy_context} · Claude {fmt_energy(provider_energy["claude"])} · Codex {fmt_energy(provider_energy["codex"])} · Gemini {fmt_energy(provider_energy["gemini"])}</div>
   </div>
   <div class="card">
     <div class="label">CO2 Emitted</div>
@@ -1291,7 +1289,7 @@ function updateDashboard() {{
 
   // Header
   setText('dateRange', dl[0]+' to '+dl[dl.length-1]+' ('+n+' active days)');
-  setText('tokenSummary', tTok.toLocaleString()+' total tokens · '+tot.inp.toLocaleString()+' input · '+tot.out.toLocaleString()+' output · '+tot.cached.toLocaleString()+' cached');
+  setText('tokenSummary', tTok.toLocaleString('en-US')+' total tokens · '+tot.inp.toLocaleString('en-US')+' input · '+tot.out.toLocaleString('en-US')+' output · '+tot.cached.toLocaleString('en-US')+' cached');
 
   // Usage cards
   const allInp = tot.inp + tot.cached;
@@ -1386,12 +1384,12 @@ function updateDashboard() {{
   }});
   const mk = Object.keys(mo).sort();
   if (mk.length >= 2) {{
-    let cur = new Date(mk[0]+'-01');
-    const end = new Date(mk[mk.length-1]+'-01');
-    while (cur <= end) {{
-      const k = cur.toISOString().slice(0,7);
+    let [_fy,_fm] = mk[0].split('-').map(Number);
+    const [_ey,_em] = mk[mk.length-1].split('-').map(Number);
+    while (_fy < _ey || (_fy === _ey && _fm <= _em)) {{
+      const k = String(_fy)+'-'+String(_fm).padStart(2,'0');
       if (!mo[k]) {{ mo[k] = [0,0,0]; mt[k] = PKEYS.map(()=>({{i:0,o:0,c:0}})); }}
-      cur.setMonth(cur.getMonth()+1);
+      _fm++; if (_fm > 12) {{ _fm = 1; _fy++; }}
     }}
   }}
   const sm = Object.keys(mo).sort();
