@@ -21,9 +21,34 @@ import sys
 import tempfile
 import webbrowser
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    name: str           # "claude" — internal key
+    display_name: str   # "Claude Code" — shown in UI
+    key: str            # "c" — compact key in raw data JSON
+    color: str          # "#6366f1" — chart/legend color
+    collect_fn: str     # "collect_claude_data" — function name (string for mockability)
+    label: str          # "Claude Code (ccusage)" — status message during collection
+    rates: tuple[float, float, float]  # (input, output, cached) per-token USD rates
+
+
+PROVIDERS: tuple[ProviderConfig, ...] = (
+    ProviderConfig("claude", "Claude Code", "c", "#6366f1",
+                   "collect_claude_data", "Claude Code (ccusage)",
+                   (3e-6, 15e-6, 0.30e-6)),
+    ProviderConfig("codex", "Codex CLI", "x", "#22c55e",
+                   "collect_codex_data", "Codex CLI (@ccusage/codex)",
+                   (0.69e-6, 2.76e-6, 0.17e-6)),
+    ProviderConfig("gemini", "Gemini CLI", "g", "#f59e0b",
+                   "collect_gemini_data", "Gemini CLI (telemetry)",
+                   (1.25e-6, 10.0e-6, 0.125e-6)),
+)
 
 # --- Energy / Carbon Model ---
 ENERGY_PER_OUTPUT_TOKEN_WH = 0.001
@@ -304,33 +329,31 @@ def calculate_water(energy_wh: float) -> float:
 
 
 def merge_data(
-    claude_data: dict[str, dict[str, Any]],
-    codex_data: dict[str, dict[str, Any]],
-    gemini_data: dict[str, dict[str, Any]],
+    provider_data: dict[str, dict[str, dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     """Merge all provider data into a unified daily dataset."""
-    all_dates = sorted(set(list(claude_data.keys()) + list(codex_data.keys()) + list(gemini_data.keys())))
+    all_dates = sorted({d for pdata in provider_data.values() for d in pdata})
+    provider_names = [p.name for p in PROVIDERS]
 
     merged = []
     for date in all_dates:
-        row: dict[str, Any] = {"date": date, "claude": {}, "codex": {}, "gemini": {}}
-        for provider, data in [("claude", claude_data), ("codex", codex_data), ("gemini", gemini_data)]:
-            if date in data:
-                d = data[date]
+        row: dict[str, Any] = {"date": date}
+        for name in provider_names:
+            pdata = provider_data.get(name, {})
+            if date in pdata:
+                d = pdata[date]
                 energy = calculate_energy(d["input_tokens"], d["output_tokens"], d["cache_read_tokens"])
-                carbon = calculate_carbon(energy)
-                water = calculate_water(energy)
-                row[provider] = {
+                row[name] = {
                     "input_tokens": d["input_tokens"],
                     "output_tokens": d["output_tokens"],
                     "cache_read_tokens": d["cache_read_tokens"],
                     "cost": round(d["cost"], 4),
                     "energy_wh": round(energy, 4),
-                    "carbon_g": round(carbon, 4),
-                    "water_ml": round(water, 4),
+                    "carbon_g": round(calculate_carbon(energy), 4),
+                    "water_ml": round(calculate_water(energy), 4),
                 }
             else:
-                row[provider] = {
+                row[name] = {
                     "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
                     "cost": 0, "energy_wh": 0, "carbon_g": 0, "water_ml": 0,
                 }
@@ -349,11 +372,11 @@ def compute_dashboard_data(data: list[dict[str, Any]]) -> dict[str, Any]:
 
     # Provider data presence (for default toggle state)
     provider_has_data = {
-        p: any(
-            r[p]["input_tokens"] + r[p]["output_tokens"] + r[p]["cache_read_tokens"] > 0
+        p.name: any(
+            r[p.name]["input_tokens"] + r[p.name]["output_tokens"] + r[p.name]["cache_read_tokens"] > 0
             for r in data
         )
-        for p in ["claude", "codex", "gemini"]
+        for p in PROVIDERS
     }
 
     # Date range
@@ -361,20 +384,25 @@ def compute_dashboard_data(data: list[dict[str, Any]]) -> dict[str, Any]:
     max_date = data[-1]["date"] if data else ""
 
     # Raw data for client-side filtering and rendering
-    raw_data = [{
-        "d": r["date"],
-        "c": [r["claude"]["input_tokens"], r["claude"]["output_tokens"],
-              r["claude"]["cache_read_tokens"], round(r["claude"]["cost"], 4)],
-        "x": [r["codex"]["input_tokens"], r["codex"]["output_tokens"],
-              r["codex"]["cache_read_tokens"], round(r["codex"]["cost"], 4)],
-        "g": [r["gemini"]["input_tokens"], r["gemini"]["output_tokens"],
-              r["gemini"]["cache_read_tokens"], round(r["gemini"]["cost"], 4)],
-    } for r in data]
+    raw_data = []
+    for r in data:
+        row: dict[str, Any] = {"d": r["date"]}
+        for p in PROVIDERS:
+            row[p.key] = [
+                r[p.name]["input_tokens"], r[p.name]["output_tokens"],
+                r[p.name]["cache_read_tokens"], round(r[p.name]["cost"], 4),
+            ]
+        raw_data.append(row)
 
     return {
         "rawData": raw_data,
         "githubUser": github_username,
         "providerHasData": provider_has_data,
+        "providers": [
+            {"name": p.name, "displayName": p.display_name, "key": p.key,
+             "color": p.color, "rates": {"input": p.rates[0], "output": p.rates[1], "cached": p.rates[2]}}
+            for p in PROVIDERS
+        ],
         "minDate": min_date,
         "maxDate": max_date,
         "electricityCostKwh": ELECTRICITY_COST_KWH,
@@ -427,24 +455,20 @@ def main() -> None:
 
     print("Collecting AI usage data...")
 
-    print("  Claude Code (ccusage)...", file=sys.stderr)
-    claude = collect_claude_data(args.since, args.until)
-    print(f"    {len(claude)} days", file=sys.stderr)
+    provider_data: dict[str, dict[str, dict[str, Any]]] = {}
+    for p in PROVIDERS:
+        print(f"  {p.label}...", file=sys.stderr)
+        collector = getattr(sys.modules[__name__], p.collect_fn)
+        data = collector(args.since, args.until)
+        print(f"    {len(data)} days", file=sys.stderr)
+        provider_data[p.name] = data
 
-    print("  Codex CLI (@ccusage/codex)...", file=sys.stderr)
-    codex = collect_codex_data(args.since, args.until)
-    print(f"    {len(codex)} days", file=sys.stderr)
-
-    print("  Gemini CLI (telemetry)...", file=sys.stderr)
-    gemini = collect_gemini_data(args.since, args.until)
-    print(f"    {len(gemini)} days", file=sys.stderr)
-
-    if not claude and not codex and not gemini:
+    if not any(provider_data.values()):
         print("\nNo usage data found from any source.", file=sys.stderr)
         print("Make sure ccusage is installed: npm i -g ccusage", file=sys.stderr)
         sys.exit(1)
 
-    merged = merge_data(claude, codex, gemini)
+    merged = merge_data(provider_data)
     print(f"\nMerged: {len(merged)} days of data", file=sys.stderr)
 
     output_path = args.output

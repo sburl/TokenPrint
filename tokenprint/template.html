@@ -11,7 +11,6 @@
   :root {
     --bg: #0f172a; --surface: #1e293b; --border: #334155;
     --text: #f1f5f9; --muted: #94a3b8; --accent: #6366f1;
-    --claude: #6366f1; --codex: #22c55e; --gemini: #f59e0b;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 2rem; }
@@ -59,9 +58,7 @@
   .cost-matrix .row-total { font-weight: 700; }
   .cost-matrix .col-totals td { border-top: 2px solid var(--accent); font-weight: 700; border-bottom: none; }
   .cost-matrix .col-totals .month-label { color: var(--text); }
-  .cost-matrix th.claude { color: var(--claude); }
-  .cost-matrix th.codex { color: var(--codex); }
-  .cost-matrix th.gemini { color: var(--gemini); }
+  .cost-matrix th[data-provider] { color: var(--provider-color); }
   .cost-matrix td.has-tip { cursor: help; position: relative; }
   .cost-matrix td.has-tip:hover .tip { display: block; }
   .tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #0f172a; border: 1px solid var(--accent); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.7rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }
@@ -96,11 +93,7 @@
   <button onclick="resetDates()">Reset</button>
 </div>
 
-<div class="legend">
-  <div class="legend-item" data-provider="claude" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--claude)"></div> Claude Code</div>
-  <div class="legend-item" data-provider="codex" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--codex)"></div> Codex CLI</div>
-  <div class="legend-item" data-provider="gemini" onclick="toggleProvider(this)"><div class="legend-dot" style="background: var(--gemini)"></div> Gemini CLI</div>
-</div>
+<div class="legend" id="legend"></div>
 
 <div class="cards">
   <div class="card">
@@ -128,7 +121,7 @@
 <div class="matrix-box">
   <h3>Monthly Estimated API Cost by Provider</h3>
   <table class="cost-matrix">
-    <thead id="matrixHead"><tr><th></th><th class="claude">Claude</th><th class="codex">Codex</th><th class="gemini">Gemini</th><th>Total</th></tr></thead>
+    <thead id="matrixHead"></thead>
     <tbody id="matrixBody"></tbody>
   </table>
 </div>
@@ -280,16 +273,18 @@
 // === 1. Config & Constants ===
 const RAW = TP.rawData;
 const GITHUB_USER = TP.githubUser;
-const PROVIDERS = ['claude', 'codex', 'gemini'];
-const PROVIDER_KEYS = ['c', 'x', 'g'];  // Compact keys in raw data: c=claude, x=codex, g=gemini
-const PROVIDER_COLORS = ['#6366f1', '#22c55e', '#f59e0b'];
-const PROVIDER_NAMES = ['Claude', 'Codex', 'Gemini'];
+const PROVIDERS = TP.providers.map(p => p.name);
+const PROVIDER_KEYS = TP.providers.map(p => p.key);
+const PROVIDER_COLORS = TP.providers.map(p => p.color);
+const PROVIDER_NAMES = TP.providers.map(p => p.displayName);
 // Energy model constants (single source of truth: Python passes via TP.energyModel)
 const EM = TP.energyModel;
 const ENERGY = {OUTPUT: EM.outputWhPerToken, INPUT: EM.inputWhPerToken, CACHE: EM.cachedWhPerToken, PUE: EM.pue, GRID: EM.gridLossFactor};
 const CLIMATE = {INTENSITY: EM.carbonIntensity, EMBODIED: EM.embodiedCarbonFactor, WUE: EM.waterUseEfficiency, ELEC_COST: TP.electricityCostKwh};
 // Per-provider known rates: [input, output, cached] cost per token
-const PROVIDER_RATES = {c: [3e-6, 15e-6, 0.30e-6], x: [0.69e-6, 2.76e-6, 0.17e-6], g: [1.25e-6, 10.0e-6, 0.125e-6]};
+const PROVIDER_RATES = Object.fromEntries(
+    TP.providers.map(p => [p.key, [p.rates.input, p.rates.output, p.rates.cached]])
+);
 
 // === 2. Chart State ===
 const charts = {};
@@ -356,11 +351,9 @@ function getActiveProviders() {
 // === 6. Dashboard Section: Compute Totals ===
 function computeTotals(filtered, activeSet) {
   const totals = {cost: 0, input: 0, output: 0, cached: 0, energy: 0, carbon: 0, water: 0};
-  const providerTotals = {
-    claude: {cost: 0, energy: 0, carbon: 0},
-    codex:  {cost: 0, energy: 0, carbon: 0},
-    gemini: {cost: 0, energy: 0, carbon: 0},
-  };
+  const providerTotals = Object.fromEntries(
+    PROVIDERS.map(p => [p, {cost: 0, energy: 0, carbon: 0}])
+  );
   filtered.forEach(row => {
     PROVIDER_KEYS.forEach((key, idx) => {
       if (!activeSet.has(PROVIDERS[idx])) return;
@@ -395,10 +388,10 @@ function updateCards(filtered, totals, providerTotals, activeProviders, activeSe
   // Cost card
   const costPerM = totalTokens > 0 ? totals.cost / (totalTokens / 1e6) : 0;
   const costParts = [];
-  [['claude', 'Claude'], ['codex', 'Codex'], ['gemini', 'Gemini']].forEach(([key, name]) => {
+  PROVIDERS.forEach((key, idx) => {
     if (activeSet.has(key)) {
       const pct = totals.cost > 0 ? (providerTotals[key].cost / totals.cost * 100).toFixed(0) : 0;
-      costParts.push(name + ' ' + pct + '%');
+      costParts.push(PROVIDER_NAMES[idx] + ' ' + pct + '%');
     }
   });
   setText('cardCostVal', fmtCost(totals.cost));
@@ -426,8 +419,8 @@ function updateCards(filtered, totals, providerTotals, activeProviders, activeSe
   const cacheRate = allInput > 0 ? (totals.cached / allInput * 100).toFixed(0) : 0;
   let cacheSavings = 0;
   filtered.forEach(row => {
-    [['c', 'claude'], ['x', 'codex'], ['g', 'gemini']].forEach(([key, prov]) => {
-      if (!activeSet.has(prov)) return;
+    PROVIDER_KEYS.forEach((key, idx) => {
+      if (!activeSet.has(PROVIDERS[idx])) return;
       const cached = row[key][2];
       const rates = PROVIDER_RATES[key];
       cacheSavings += cached * (rates[0] - rates[2]);
@@ -439,8 +432,9 @@ function updateCards(filtered, totals, providerTotals, activeProviders, activeSe
   // Output card: estimated output cost share
   let estOutputCost = 0, estTotalCost = 0;
   filtered.forEach(row => {
-    [['c', 'claude', PROVIDER_RATES.c], ['x', 'codex', PROVIDER_RATES.x], ['g', 'gemini', PROVIDER_RATES.g]].forEach(([key, prov, rates]) => {
-      if (!activeSet.has(prov)) return;
+    PROVIDER_KEYS.forEach((key, idx) => {
+      if (!activeSet.has(PROVIDERS[idx])) return;
+      const rates = PROVIDER_RATES[key];
       const [input, output, cached] = row[key];
       estOutputCost += output * rates[1];
       estTotalCost += input * rates[0] + output * rates[1] + cached * rates[2];
@@ -541,7 +535,8 @@ function updateMatrix(filtered, activeSet) {
   headerRow.appendChild(document.createElement('th'));
   activeIndices.forEach(i => {
     const th = document.createElement('th');
-    th.className = PROVIDERS[i];
+    th.dataset.provider = PROVIDERS[i];
+    th.style.setProperty('--provider-color', PROVIDER_COLORS[i]);
     th.textContent = PROVIDER_NAMES[i];
     headerRow.appendChild(th);
   });
@@ -1091,13 +1086,27 @@ function showSharePreview(canvas) {
 }
 
 // === 16. Initialization ===
-// Set initial provider toggle state
-Object.entries(TP.providerHasData).forEach(([provider, hasData]) => {
-    if (!hasData) {
-        const el = document.querySelector('.legend-item[data-provider="' + provider + '"]');
-        if (el) el.classList.add('off');
-    }
+// Set CSS variables for provider colors
+TP.providers.forEach(p => {
+    document.documentElement.style.setProperty('--' + p.name, p.color);
 });
+
+// Generate legend items dynamically
+(function initLegend() {
+    const container = document.getElementById('legend');
+    TP.providers.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'legend-item' + (TP.providerHasData[p.name] ? '' : ' off');
+        item.dataset.provider = p.name;
+        item.onclick = function() { toggleProvider(this); };
+        const dot = document.createElement('div');
+        dot.className = 'legend-dot';
+        dot.style.background = p.color;
+        item.appendChild(dot);
+        item.appendChild(document.createTextNode(' ' + p.displayName));
+        container.appendChild(item);
+    });
+})();
 
 // Initialize date inputs
 const _si = document.getElementById('startDate');

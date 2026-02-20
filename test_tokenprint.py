@@ -25,6 +25,8 @@ from tokenprint import (
     run_command,
     detect_github_username,
     main,
+    ProviderConfig,
+    PROVIDERS,
     ENERGY_PER_OUTPUT_TOKEN_WH,
     ENERGY_PER_INPUT_TOKEN_WH,
     ENERGY_PER_CACHED_TOKEN_WH,
@@ -218,7 +220,7 @@ class TestDetectGithubUsername:
 
 class TestMergeData:
     def test_empty(self):
-        assert merge_data({}, {}, {}) == []
+        assert merge_data({"claude": {}, "codex": {}, "gemini": {}}) == []
 
     def test_single_provider(self):
         claude = {
@@ -231,7 +233,7 @@ class TestMergeData:
                 "cost": 0.05,
             }
         }
-        result = merge_data(claude, {}, {})
+        result = merge_data({"claude": claude, "codex": {}, "gemini": {}})
         assert len(result) == 1
         row = result[0]
         assert row["date"] == "2026-01-15"
@@ -245,7 +247,7 @@ class TestMergeData:
     def test_multiple_providers_same_date(self):
         claude = {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.05}}
         codex = {"2026-01-15": {"provider": "codex", "input_tokens": 200, "output_tokens": 100, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.03}}
-        result = merge_data(claude, codex, {})
+        result = merge_data({"claude": claude, "codex": codex, "gemini": {}})
         assert len(result) == 1
         assert result[0]["claude"]["input_tokens"] == 100
         assert result[0]["codex"]["input_tokens"] == 200
@@ -253,14 +255,14 @@ class TestMergeData:
     def test_sorted_dates(self):
         claude = {"2026-01-20": {"provider": "claude", "input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}}
         codex = {"2026-01-10": {"provider": "codex", "input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}}
-        result = merge_data(claude, codex, {})
+        result = merge_data({"claude": claude, "codex": codex, "gemini": {}})
         assert result[0]["date"] == "2026-01-10"
         assert result[1]["date"] == "2026-01-20"
 
     def test_energy_carbon_water_values(self):
         """Verify computed energy/carbon/water values match expectations."""
         claude = {"2026-01-15": {"provider": "claude", "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 200, "cache_write_tokens": 0, "cost": 0.10}}
-        result = merge_data(claude, {}, {})
+        result = merge_data({"claude": claude, "codex": {}, "gemini": {}})
         row = result[0]["claude"]
         expected_energy = calculate_energy(1000, 500, 200)
         assert row["energy_wh"] == pytest.approx(round(expected_energy, 4))
@@ -272,11 +274,11 @@ class TestMergeData:
 
 class TestComputeDashboardData:
     def _make_data(self):
-        return merge_data(
-            {"2026-01-15": {"provider": "claude", "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 200, "cache_write_tokens": 0, "cost": 0.10}},
-            {"2026-01-16": {"provider": "codex", "input_tokens": 800, "output_tokens": 400, "cache_read_tokens": 100, "cache_write_tokens": 0, "cost": 0.05}},
-            {},
-        )
+        return merge_data({
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 1000, "output_tokens": 500, "cache_read_tokens": 200, "cache_write_tokens": 0, "cost": 0.10}},
+            "codex": {"2026-01-16": {"provider": "codex", "input_tokens": 800, "output_tokens": 400, "cache_read_tokens": 100, "cache_write_tokens": 0, "cost": 0.05}},
+            "gemini": {},
+        })
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_returns_required_keys(self, mock_user):
@@ -285,6 +287,7 @@ class TestComputeDashboardData:
         assert "rawData" in config
         assert "githubUser" in config
         assert "providerHasData" in config
+        assert "providers" in config
         assert "minDate" in config
         assert "maxDate" in config
         assert "electricityCostKwh" in config
@@ -328,10 +331,10 @@ class TestComputeDashboardData:
         raw = config["rawData"]
         assert len(raw) == 2
         assert "d" in raw[0]
-        assert "c" in raw[0]  # claude
-        assert "x" in raw[0]  # codex
-        assert "g" in raw[0]  # gemini
-        assert len(raw[0]["c"]) == 4  # [input, output, cached, cost]
+        # Verify keys come from registry
+        for p in PROVIDERS:
+            assert p.key in raw[0]
+        assert len(raw[0][PROVIDERS[0].key]) == 4  # [input, output, cached, cost]
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_empty_data(self, mock_user):
@@ -343,10 +346,10 @@ class TestComputeDashboardData:
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_raw_data_field_ordering(self, mock_user):
         """Verify raw data arrays are [input, output, cached, cost] in correct order."""
-        data = merge_data(
-            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 200, "cache_read_tokens": 300, "cache_write_tokens": 0, "cost": 0.50}},
-            {}, {},
-        )
+        data = merge_data({
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 200, "cache_read_tokens": 300, "cache_write_tokens": 0, "cost": 0.50}},
+            "codex": {}, "gemini": {},
+        })
         config = compute_dashboard_data(data)
         c = config["rawData"][0]["c"]
         assert c[0] == 100   # input
@@ -497,10 +500,10 @@ class TestCollectGeminiData:
 class TestGenerateHtml:
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_smoke(self, mock_user):
-        data = merge_data(
-            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
-            {}, {},
-        )
+        data = merge_data({
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
+            "codex": {}, "gemini": {},
+        })
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
             output_path = f.name
         try:
@@ -517,10 +520,10 @@ class TestGenerateHtml:
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_energy_model_in_output(self, mock_user):
         """Verify the generated HTML contains energy model constants from Python."""
-        data = merge_data(
-            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
-            {}, {},
-        )
+        data = merge_data({
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
+            "codex": {}, "gemini": {},
+        })
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
             output_path = f.name
         try:
@@ -536,10 +539,10 @@ class TestGenerateHtml:
     def test_missing_template(self, mock_user):
         """generate_html should raise FileNotFoundError if template.html is missing."""
         import tokenprint as tp
-        data = merge_data(
-            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
-            {}, {},
-        )
+        data = merge_data({
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
+            "codex": {}, "gemini": {},
+        })
         with tempfile.TemporaryDirectory() as tmpdir:
             original_file = tp.__file__
             try:
@@ -661,3 +664,37 @@ class TestDateValidation:
         from datetime import datetime
         with pytest.raises(ValueError):
             datetime.strptime("20260230", "%Y%m%d")
+
+
+# --- Provider Registry ---
+
+class TestProviderRegistry:
+    def test_provider_count(self):
+        assert len(PROVIDERS) == 3
+
+    def test_unique_names(self):
+        names = [p.name for p in PROVIDERS]
+        assert len(names) == len(set(names))
+
+    def test_unique_keys(self):
+        keys = [p.key for p in PROVIDERS]
+        assert len(keys) == len(set(keys))
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_config_includes_providers(self, mock_user):
+        """Verify compute_dashboard_data output includes providers list with correct structure."""
+        data = merge_data({
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
+            "codex": {}, "gemini": {},
+        })
+        config = compute_dashboard_data(data)
+        providers = config["providers"]
+        assert len(providers) == len(PROVIDERS)
+        for i, p in enumerate(PROVIDERS):
+            assert providers[i]["name"] == p.name
+            assert providers[i]["displayName"] == p.display_name
+            assert providers[i]["key"] == p.key
+            assert providers[i]["color"] == p.color
+            assert providers[i]["rates"]["input"] == p.rates[0]
+            assert providers[i]["rates"]["output"] == p.rates[1]
+            assert providers[i]["rates"]["cached"] == p.rates[2]
