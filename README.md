@@ -12,8 +12,11 @@ TokenPrint collects usage data from **Claude Code**, **Codex CLI**, and **Gemini
 # One-command setup (installs ccusage, codex, gemini telemetry)
 bash install.sh
 
+# Install CLI
+pipx install -e .
+
 # Run
-python3 tokenprint.py     # Opens dashboard in browser
+tokenprint                # Opens dashboard in browser
 ```
 
 Or install manually: `npm i -g ccusage` for Claude data. Codex works via `npx` (no install). Gemini is optional.
@@ -41,12 +44,12 @@ An interactive dark-mode dashboard with:
 ## Usage
 
 ```bash
-python3 tokenprint.py                           # Full history, opens in browser
-python3 tokenprint.py --since 20260201          # From date
-python3 tokenprint.py --until 20260215          # To date
-python3 tokenprint.py --since 20260201 --until 20260215  # Date range
-python3 tokenprint.py --no-open                 # Generate without opening
-python3 tokenprint.py --output ~/report.html    # Custom output path
+tokenprint                                      # Full history, opens in browser
+tokenprint --since 20260201                     # From date
+tokenprint --until 20260215                     # To date
+tokenprint --since 20260201 --until 20260215    # Date range
+tokenprint --no-open                            # Generate without opening
+tokenprint --output ~/report.html               # Custom output path
 ```
 
 The default output is `/tmp/tokenprint.html` — a fixed path so you can re-run and Command-R to refresh.
@@ -92,7 +95,7 @@ These are rough estimates. Actual impact varies by model, hardware, data center 
 If you use [CrossCheck](https://github.com/sburl/CrossCheck), TokenPrint is available as the `/ai-impact` skill:
 
 ```bash
-/ai-impact                    # Same as running tokenprint.py
+/ai-impact                    # Same as running tokenprint
 /ai-impact --since 20260201   # With date filter
 ```
 

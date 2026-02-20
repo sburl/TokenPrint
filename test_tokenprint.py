@@ -2,8 +2,10 @@
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 
 import pytest
 
@@ -20,6 +22,9 @@ from tokenprint import (
     collect_claude_data,
     collect_codex_data,
     collect_gemini_data,
+    run_command,
+    detect_github_username,
+    main,
     ENERGY_PER_OUTPUT_TOKEN_WH,
     ENERGY_PER_INPUT_TOKEN_WH,
     ENERGY_PER_CACHED_TOKEN_WH,
@@ -28,7 +33,6 @@ from tokenprint import (
     CARBON_INTENSITY,
     EMBODIED_CARBON_FACTOR,
     WATER_USE_EFFICIENCY,
-    ELECTRICITY_COST_KWH,
 )
 
 
@@ -158,6 +162,58 @@ class TestCalculateWater:
         assert calculate_water(1000) == pytest.approx(expected)
 
 
+# --- run_command ---
+
+class TestRunCommand:
+    def test_successful_command(self):
+        result = run_command(["echo", "hello"])
+        assert result == "hello"
+
+    def test_failing_command(self):
+        result = run_command(["false"])
+        assert result is None
+
+    def test_nonexistent_binary(self):
+        result = run_command(["__nonexistent_binary_xyz__"])
+        assert result is None
+
+    def test_timeout(self):
+        result = run_command(["sleep", "10"], timeout=1)
+        assert result is None
+
+    def test_strips_output(self):
+        result = run_command(["echo", "  spaces  "])
+        assert result == "spaces"
+
+
+# --- detect_github_username ---
+
+class TestDetectGithubUsername:
+    @patch("tokenprint.run_command", side_effect=[None, None])
+    def test_fallback_to_dev(self, mock_run):
+        # When both gh and git fail, and no TTY for input
+        with patch("builtins.input", side_effect=EOFError):
+            assert detect_github_username() == "dev"
+
+    @patch("tokenprint.run_command", side_effect=["ghuser", None])
+    def test_gh_cli(self, mock_run):
+        assert detect_github_username() == "ghuser"
+
+    @patch("tokenprint.run_command", side_effect=[None, "gituser"])
+    def test_git_config_fallback(self, mock_run):
+        assert detect_github_username() == "gituser"
+
+    @patch("tokenprint.run_command", side_effect=[None, None])
+    def test_interactive_input(self, mock_run):
+        with patch("builtins.input", return_value="manual"):
+            assert detect_github_username() == "manual"
+
+    @patch("tokenprint.run_command", side_effect=[None, None])
+    def test_keyboard_interrupt(self, mock_run):
+        with patch("builtins.input", side_effect=KeyboardInterrupt):
+            assert detect_github_username() == "dev"
+
+
 # --- merge_data ---
 
 class TestMergeData:
@@ -233,6 +289,20 @@ class TestComputeDashboardData:
         assert "maxDate" in config
         assert "electricityCostKwh" in config
         assert "generatedAt" in config
+        assert "energyModel" in config
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_energy_model_keys(self, mock_user):
+        config = compute_dashboard_data(self._make_data())
+        em = config["energyModel"]
+        assert em["outputWhPerToken"] == ENERGY_PER_OUTPUT_TOKEN_WH
+        assert em["inputWhPerToken"] == ENERGY_PER_INPUT_TOKEN_WH
+        assert em["cachedWhPerToken"] == ENERGY_PER_CACHED_TOKEN_WH
+        assert em["pue"] == PUE
+        assert em["gridLossFactor"] == GRID_LOSS_FACTOR
+        assert em["carbonIntensity"] == CARBON_INTENSITY
+        assert em["embodiedCarbonFactor"] == EMBODIED_CARBON_FACTOR
+        assert em["waterUseEfficiency"] == WATER_USE_EFFICIENCY
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_github_user(self, mock_user):
@@ -445,6 +515,24 @@ class TestGenerateHtml:
             os.unlink(output_path)
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_energy_model_in_output(self, mock_user):
+        """Verify the generated HTML contains energy model constants from Python."""
+        data = merge_data(
+            {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}},
+            {}, {},
+        )
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            output_path = f.name
+        try:
+            generate_html(data, output_path)
+            with open(output_path) as f:
+                html = f.read()
+            assert "energyModel" in html
+            assert "outputWhPerToken" in html
+        finally:
+            os.unlink(output_path)
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_missing_template(self, mock_user):
         """generate_html should raise FileNotFoundError if template.html is missing."""
         import tokenprint as tp
@@ -460,6 +548,100 @@ class TestGenerateHtml:
                     generate_html(data, os.path.join(tmpdir, "output.html"))
             finally:
                 tp.__file__ = original_file
+
+
+# --- main() ---
+
+class TestMain:
+    @patch("tokenprint.webbrowser.open")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data", return_value={
+        "2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50,
+                       "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}
+    })
+    def test_default_run(self, mock_claude, mock_codex, mock_gemini, mock_user, mock_browser):
+        """main() should generate HTML and open browser by default."""
+        with patch("sys.argv", ["tokenprint"]):
+            main()
+        mock_browser.assert_called_once()
+        # Verify the file was created
+        call_arg = mock_browser.call_args[0][0]
+        assert "tokenprint.html" in call_arg
+
+    @patch("tokenprint.webbrowser.open")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data", return_value={
+        "2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50,
+                       "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}
+    })
+    def test_no_open_flag(self, mock_claude, mock_codex, mock_gemini, mock_user, mock_browser):
+        """--no-open should skip browser."""
+        with patch("sys.argv", ["tokenprint", "--no-open"]):
+            main()
+        mock_browser.assert_not_called()
+
+    @patch("tokenprint.webbrowser.open")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data", return_value={
+        "2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50,
+                       "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}
+    })
+    def test_custom_output(self, mock_claude, mock_codex, mock_gemini, mock_user, mock_browser):
+        """--output should write to custom path."""
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            output_path = f.name
+        try:
+            with patch("sys.argv", ["tokenprint", "--output", output_path, "--no-open"]):
+                main()
+            with open(output_path) as f:
+                html = f.read()
+            assert "TokenPrint" in html
+        finally:
+            os.unlink(output_path)
+
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data", return_value={})
+    def test_no_data_exits(self, mock_claude, mock_codex, mock_gemini):
+        """main() should exit with code 1 when no data is found."""
+        with patch("sys.argv", ["tokenprint", "--no-open"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_invalid_since_date(self):
+        """--since with bad format should error."""
+        with patch("sys.argv", ["tokenprint", "--since", "not-a-date"]):
+            with pytest.raises(SystemExit):
+                main()
+
+    def test_invalid_calendar_date(self):
+        """--since with impossible calendar date should error."""
+        with patch("sys.argv", ["tokenprint", "--since", "20261345"]):
+            with pytest.raises(SystemExit):
+                main()
+
+    @patch("tokenprint.webbrowser.open")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data", return_value={
+        "2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50,
+                       "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}
+    })
+    def test_since_until_passed_to_collectors(self, mock_claude, mock_codex, mock_gemini, mock_user, mock_browser):
+        """Date args should be forwarded to collectors."""
+        with patch("sys.argv", ["tokenprint", "--since", "20260101", "--until", "20260131", "--no-open"]):
+            main()
+        mock_claude.assert_called_once_with("20260101", "20260131")
+        mock_codex.assert_called_once_with("20260101", "20260131")
+        mock_gemini.assert_called_once_with("20260101", "20260131")
 
 
 # --- Date validation edge cases ---

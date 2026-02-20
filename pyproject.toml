@@ -1,0 +1,29 @@
+[project]
+name = "tokenprint"
+version = "1.0.0"
+description = "AI usage & environmental impact dashboard for Claude, Codex, and Gemini"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+scripts.tokenprint = "tokenprint:main"
+
+[tool.setuptools]
+packages = ["tokenprint"]
+
+[tool.setuptools.package-data]
+tokenprint = ["template.html"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "pytest-cov", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

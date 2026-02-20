@@ -284,9 +284,10 @@ const PROVIDERS = ['claude', 'codex', 'gemini'];
 const PROVIDER_KEYS = ['c', 'x', 'g'];  // Compact keys in raw data: c=claude, x=codex, g=gemini
 const PROVIDER_COLORS = ['#6366f1', '#22c55e', '#f59e0b'];
 const PROVIDER_NAMES = ['Claude', 'Codex', 'Gemini'];
-// Energy model constants (must match Python tokenprint.py values)
-const ENERGY = {OUTPUT: 0.001, INPUT: 0.0002, CACHE: 0.00005, PUE: 1.2, GRID: 1.05};
-const CLIMATE = {INTENSITY: 390, EMBODIED: 1.2, WUE: 0.5, ELEC_COST: TP.electricityCostKwh};
+// Energy model constants (single source of truth: Python passes via TP.energyModel)
+const EM = TP.energyModel;
+const ENERGY = {OUTPUT: EM.outputWhPerToken, INPUT: EM.inputWhPerToken, CACHE: EM.cachedWhPerToken, PUE: EM.pue, GRID: EM.gridLossFactor};
+const CLIMATE = {INTENSITY: EM.carbonIntensity, EMBODIED: EM.embodiedCarbonFactor, WUE: EM.waterUseEfficiency, ELEC_COST: TP.electricityCostKwh};
 // Per-provider known rates: [input, output, cached] cost per token
 const PROVIDER_RATES = {c: [3e-6, 15e-6, 0.30e-6], x: [0.69e-6, 2.76e-6, 0.17e-6], g: [1.25e-6, 10.0e-6, 0.125e-6]};
 
