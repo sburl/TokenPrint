@@ -1,7 +1,7 @@
 #!/bin/bash
 # setup-gemini-telemetry.sh
 # Enables OpenTelemetry local file logging for Gemini CLI
-# so that tokenprint.py can read token usage data.
+# so that tokenprint can read token usage data.
 #
 # Safe to run multiple times (idempotent).
 
