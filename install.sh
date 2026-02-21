@@ -37,12 +37,13 @@ fi
 # --- 4. Install @ccusage/codex (Codex CLI usage tracking) ---
 echo ""
 echo "--- Codex CLI (@ccusage/codex) ---"
-# @ccusage/codex runs via npx, so just verify it's reachable
-echo "Verifying @ccusage/codex is accessible via npx..."
-if npx @ccusage/codex@18 --help &>/dev/null 2>&1; then
-    echo "[ok] @ccusage/codex accessible via npx"
+# Install globally so tokenprint can run offline/quickly without npx network fetches.
+if command -v ccusage-codex &>/dev/null; then
+    echo "[ok] ccusage-codex already installed: $(ccusage-codex --version 2>&1 || echo 'installed')"
 else
-    echo "[warn] @ccusage/codex may not be available. It runs via npx and requires Codex CLI usage logs to exist."
+    echo "Installing @ccusage/codex..."
+    npm install -g @ccusage/codex@18
+    echo "[ok] @ccusage/codex installed"
 fi
 
 # --- 5. Setup Gemini CLI telemetry ---
@@ -82,5 +83,8 @@ echo "  --since YYYYMMDD    Start date filter"
 echo "  --until YYYYMMDD    End date filter"
 echo "  --output PATH       Custom output path"
 echo "  --no-open           Don't open in browser"
+echo "  --no-cache          Force full refresh (ignore incremental cache)"
+echo "  --serve             Start local live dashboard server (UI can refresh data)"
+echo "  --port N            Port for --serve (default: 8765)"
 echo ""
 echo "Note: Gemini telemetry only tracks future sessions — no historical backfill."

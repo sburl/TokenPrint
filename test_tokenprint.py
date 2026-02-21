@@ -5,12 +5,17 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
 from tokenprint import (
     _safe_int,
+    _next_day_compact,
+    _load_provider_cache,
+    _save_provider_cache,
+    _collect_provider_data_incremental,
     _parse_date_flexible,
     _json_dumps_html_safe,
     calculate_energy,
@@ -36,6 +41,14 @@ from tokenprint import (
     EMBODIED_CARBON_FACTOR,
     WATER_USE_EFFICIENCY,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_provider_cache(monkeypatch, tmp_path):
+    """Keep provider cache isolated per test to avoid cross-test state leakage."""
+    cache_file = tmp_path / "provider-cache-v1.json"
+    monkeypatch.setattr("tokenprint._provider_cache_path", lambda: cache_file)
+    return cache_file
 
 
 # --- _safe_int ---
@@ -89,6 +102,37 @@ class TestParseDateFlexible:
 
     def test_invalid_iso_day(self):
         assert _parse_date_flexible("2026-02-30") is None
+
+
+# --- incremental cache helpers ---
+
+class TestProviderCacheHelpers:
+    def test_next_day_compact(self):
+        assert _next_day_compact("2026-02-19") == "20260220"
+
+    def test_next_day_compact_invalid(self):
+        assert _next_day_compact("not-a-date") is None
+
+    def test_cache_round_trip(self, isolated_provider_cache):
+        provider_data = {
+            "claude": {
+                "2026-02-19": {
+                    "provider": "claude",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_tokens": 10,
+                    "cache_write_tokens": 0,
+                    "cost": 0.01,
+                }
+            },
+            "codex": {},
+            "gemini": {},
+        }
+        _save_provider_cache(provider_data, cache_path=isolated_provider_cache)
+        loaded = _load_provider_cache(cache_path=isolated_provider_cache)
+        assert loaded["claude"]["2026-02-19"]["input_tokens"] == 100
+        assert loaded["claude"]["2026-02-19"]["provider"] == "claude"
+        assert loaded["codex"] == {}
 
 
 # --- _json_dumps_html_safe ---
@@ -292,6 +336,8 @@ class TestComputeDashboardData:
         assert "maxDate" in config
         assert "electricityCostKwh" in config
         assert "generatedAt" in config
+        assert "liveMode" in config
+        assert "refreshEndpoint" in config
         assert "energyModel" in config
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
@@ -344,6 +390,12 @@ class TestComputeDashboardData:
         assert config["maxDate"] == ""
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_live_mode_fields(self, mock_user):
+        config = compute_dashboard_data(self._make_data(), live_mode=True, refresh_endpoint="/api/refresh")
+        assert config["liveMode"] is True
+        assert config["refreshEndpoint"] == "/api/refresh"
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_raw_data_field_ordering(self, mock_user):
         """Verify raw data arrays are [input, output, cached, cost] in correct order."""
         data = merge_data({
@@ -387,6 +439,91 @@ class TestCollectClaudeData:
         assert d["output_tokens"] == 150
         assert d["cache_read_tokens"] == 30
         assert d["cost"] == pytest.approx(0.03)
+
+    @patch(
+        "tokenprint.run_command",
+        return_value=json.dumps(
+            {
+                "daily": [
+                    {
+                        "date": "2026-02-20",
+                        "inputTokens": 6300,
+                        "outputTokens": 56000,
+                        "cacheCreationTokens": 5400000,
+                        "cacheReadTokens": 140000000,
+                        "totalCost": 0.75756585,
+                        "modelBreakdowns": [
+                            {
+                                "modelName": "claude-opus-4-6",
+                                "inputTokens": 5961,
+                                "outputTokens": 56165,
+                                "cacheCreationTokens": 5450259,
+                                "cacheReadTokens": 140124110,
+                                "cost": 0,
+                            },
+                            {
+                                "modelName": "claude-haiku-4-5-20251001",
+                                "inputTokens": 339,
+                                "outputTokens": 210,
+                                "cacheCreationTokens": 271871,
+                                "cacheReadTokens": 4163381,
+                                "cost": 0.75756585,
+                            },
+                        ],
+                    }
+                ]
+            }
+        ),
+    )
+    def test_estimates_unpriced_claude_models_from_breakdown(self, mock_run):
+        result = collect_claude_data()
+        d = result["2026-02-20"]
+        opus_est = (
+            5961 * 5e-6
+            + 56165 * 25e-6
+            + 5450259 * 6.25e-6
+            + 140124110 * 0.5e-6
+        )
+        assert d["cost"] == pytest.approx(0.75756585 + opus_est, rel=1e-9)
+
+    @patch(
+        "tokenprint.run_command",
+        return_value=json.dumps(
+            {
+                "daily": [
+                    {
+                        "date": "2026-02-20",
+                        "inputTokens": 1000,
+                        "outputTokens": 500,
+                        "cacheCreationTokens": 10000,
+                        "cacheReadTokens": 20000,
+                        "totalCost": 10.0,  # already above known breakdown sum
+                        "modelBreakdowns": [
+                            {
+                                "modelName": "claude-opus-4-6",
+                                "inputTokens": 1000,
+                                "outputTokens": 500,
+                                "cacheCreationTokens": 10000,
+                                "cacheReadTokens": 20000,
+                                "cost": 0,
+                            },
+                            {
+                                "modelName": "claude-haiku-4-5-20251001",
+                                "inputTokens": 1,
+                                "outputTokens": 1,
+                                "cacheCreationTokens": 1,
+                                "cacheReadTokens": 1,
+                                "cost": 1.0,
+                            },
+                        ],
+                    }
+                ]
+            }
+        ),
+    )
+    def test_does_not_double_count_when_total_cost_already_includes_unknowns(self, mock_run):
+        result = collect_claude_data()
+        assert result["2026-02-20"]["cost"] == pytest.approx(10.0)
 
 
 # --- collect_codex_data ---
@@ -495,6 +632,66 @@ class TestCollectGeminiData:
         assert result["2026-01-15"]["input_tokens"] == 500
 
 
+# --- _collect_provider_data_incremental ---
+
+class TestCollectProviderDataIncremental:
+    @staticmethod
+    def _day(provider):
+        return {
+            "provider": provider,
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_tokens": 10,
+            "cache_write_tokens": 0,
+            "cost": 0.01,
+        }
+
+    @patch("tokenprint.collect_gemini_data")
+    @patch("tokenprint.collect_codex_data")
+    @patch("tokenprint.collect_claude_data")
+    @patch("tokenprint._load_provider_cache")
+    def test_skips_collection_when_cache_is_current(self, mock_cache, mock_claude, mock_codex, mock_gemini):
+        today_iso = datetime.now().strftime("%Y-%m-%d")
+        mock_cache.return_value = {
+            "claude": {today_iso: self._day("claude")},
+            "codex": {today_iso: self._day("codex")},
+            "gemini": {today_iso: self._day("gemini")},
+        }
+
+        out = _collect_provider_data_incremental()
+
+        mock_claude.assert_not_called()
+        mock_codex.assert_not_called()
+        mock_gemini.assert_not_called()
+        assert out["claude"][today_iso]["provider"] == "claude"
+        assert out["codex"][today_iso]["provider"] == "codex"
+        assert out["gemini"][today_iso]["provider"] == "gemini"
+
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data")
+    @patch("tokenprint._load_provider_cache")
+    def test_fetches_only_new_days_per_provider(self, mock_cache, mock_claude, mock_codex, mock_gemini):
+        today = datetime.now()
+        today_iso = today.strftime("%Y-%m-%d")
+        today_compact = today.strftime("%Y%m%d")
+        yesterday_iso = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        mock_cache.return_value = {
+            "claude": {yesterday_iso: self._day("claude")},
+            "codex": {},
+            "gemini": {},
+        }
+        mock_claude.return_value = {today_iso: self._day("claude")}
+
+        out = _collect_provider_data_incremental()
+
+        mock_claude.assert_called_once_with(today_compact, today_compact)
+        mock_codex.assert_called_once_with(today_compact, today_compact)
+        mock_gemini.assert_called_once_with(today_compact, today_compact)
+        assert yesterday_iso in out["claude"]
+        assert today_iso in out["claude"]
+
+
 # --- generate_html ---
 
 class TestGenerateHtml:
@@ -556,6 +753,62 @@ class TestGenerateHtml:
 # --- main() ---
 
 class TestMain:
+    @patch("tokenprint._serve_dashboard")
+    def test_serve_mode_dispatch(self, mock_serve):
+        with patch("sys.argv", ["tokenprint", "--serve", "--no-open"]):
+            main()
+        mock_serve.assert_called_once()
+
+    @patch("tokenprint._save_provider_cache")
+    @patch("tokenprint._collect_provider_data")
+    @patch("tokenprint._collect_provider_data_incremental")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_default_run_uses_incremental(self, mock_user, mock_incremental, mock_full, mock_save):
+        mock_incremental.return_value = {
+            "claude": {
+                "2026-01-15": {
+                    "provider": "claude",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "cost": 0.01,
+                }
+            },
+            "codex": {},
+            "gemini": {},
+        }
+        with patch("sys.argv", ["tokenprint", "--no-open"]):
+            main()
+        mock_incremental.assert_called_once_with()
+        mock_full.assert_not_called()
+        mock_save.assert_called_once()
+
+    @patch("tokenprint._save_provider_cache")
+    @patch("tokenprint._collect_provider_data")
+    @patch("tokenprint._collect_provider_data_incremental")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_no_cache_flag_forces_full_collection(self, mock_user, mock_incremental, mock_full, mock_save):
+        mock_full.return_value = {
+            "claude": {
+                "2026-01-15": {
+                    "provider": "claude",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "cost": 0.01,
+                }
+            },
+            "codex": {},
+            "gemini": {},
+        }
+        with patch("sys.argv", ["tokenprint", "--no-cache", "--no-open"]):
+            main()
+        mock_incremental.assert_not_called()
+        mock_full.assert_called_once_with(None, None)
+        mock_save.assert_called_once()
+
     @patch("tokenprint.webbrowser.open")
     @patch("tokenprint.detect_github_username", return_value="testuser")
     @patch("tokenprint.collect_gemini_data", return_value={})

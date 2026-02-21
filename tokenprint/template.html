@@ -48,6 +48,19 @@
   .date-range input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   .date-range button { background: var(--border); color: var(--muted); border: none; border-radius: 0.375rem; padding: 0.375rem 0.75rem; font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
   .date-range button:hover { background: var(--accent); color: var(--text); }
+  #updateBtn.loading::after {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 6px;
+    border: 2px solid rgba(241, 245, 249, 0.35);
+    border-top-color: rgba(241, 245, 249, 1);
+    border-radius: 50%;
+    animation: tpSpin 0.8s linear infinite;
+    vertical-align: -1px;
+  }
+  @keyframes tpSpin { to { transform: rotate(360deg); } }
   .matrix-box { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 2rem; overflow-x: auto; }
   .matrix-box h3 { font-size: 0.875rem; color: var(--muted); margin-bottom: 1rem; }
   .cost-matrix { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
@@ -82,7 +95,7 @@
 </head>
 <body>
 <h1><span style="font-size: 1.1em; filter: grayscale(1) brightness(10);">⚡</span> TokenPrint</h1>
-<p class="subtitle"><span id="dateRange"></span> &middot; <span id="genTime"></span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Refresh</button></p>
+<p class="subtitle"><span id="dateRange"></span> &middot; <span id="genTime"></span> &middot; <button id="updateBtn" style="background:var(--accent);color:var(--text);border:none;border-radius:0.375rem;padding:0.15rem 0.5rem;font-size:0.75rem;cursor:pointer;opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">Reload</button></p>
 <p class="token-summary" id="tokenSummary"></p>
 
 <div class="date-range">
@@ -219,7 +232,7 @@
 
 <h4>Cost Estimates</h4>
 <ul>
-<li><strong>Claude:</strong> Cost from ccusage (uses Anthropic's published API pricing per model)</li>
+<li><strong>Claude:</strong> Cost from ccusage. If ccusage reports zero-cost for newer Claude models, TokenPrint applies a fallback estimate using Anthropic published pricing.</li>
 <li><strong>Codex (gpt-5-codex):</strong> Cost from ccusage (uses OpenAI's published pricing)</li>
 <li><strong>Codex (gpt-5.3-codex):</strong> No official API pricing yet. Uses gpt-5-codex rates ($0.69/M input, $2.76/M output, $0.17/M cached)</li>
 <li><strong>Gemini:</strong> Estimated at $1.25/M input, $10.00/M output, $0.125/M cached (Gemini 2.5 Pro pricing; cached = 10% of input rate)</li>
@@ -277,6 +290,8 @@ const PROVIDERS = TP.providers.map(p => p.name);
 const PROVIDER_KEYS = TP.providers.map(p => p.key);
 const PROVIDER_COLORS = TP.providers.map(p => p.color);
 const PROVIDER_NAMES = TP.providers.map(p => p.displayName);
+const LIVE_MODE = Boolean(TP.liveMode);
+const REFRESH_ENDPOINT = TP.refreshEndpoint || '/api/refresh';
 // Energy model constants (single source of truth: Python passes via TP.energyModel)
 const EM = TP.energyModel;
 const ENERGY = {OUTPUT: EM.outputWhPerToken, INPUT: EM.inputWhPerToken, CACHE: EM.cachedWhPerToken, PUE: EM.pue, GRID: EM.gridLossFactor};
@@ -291,6 +306,111 @@ const charts = {};
 const chartState = {};
 const chartConfigs = {};
 let currentLabels = [];
+const DATE_PREFS_KEY = 'tokenprint.datePrefs.v1';
+
+function todayIsoDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return year + '-' + month + '-' + day;
+}
+
+function clampIsoDate(value, minDate, maxDate) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  if (value < minDate) return minDate;
+  if (value > maxDate) return maxDate;
+  return value;
+}
+
+function loadDatePrefs() {
+  try {
+    const raw = window.localStorage.getItem(DATE_PREFS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      startDate: typeof parsed.startDate === 'string' ? parsed.startDate : null,
+      endDate: typeof parsed.endDate === 'string' ? parsed.endDate : null,
+      rollingEndDate: Boolean(parsed.rollingEndDate),
+      sourceMaxDate: typeof parsed.sourceMaxDate === 'string' ? parsed.sourceMaxDate : null,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveDatePrefs() {
+  const startEl = document.getElementById('startDate');
+  const endEl = document.getElementById('endDate');
+  if (!startEl || !endEl) return;
+
+  const endDate = endEl.value || TP.maxDate;
+  const prefs = {
+    startDate: startEl.value || TP.minDate,
+    endDate: endDate,
+    rollingEndDate: endDate === todayIsoDate(),
+    sourceMaxDate: TP.maxDate,
+  };
+
+  try {
+    window.localStorage.setItem(DATE_PREFS_KEY, JSON.stringify(prefs));
+  } catch (err) {
+    // Ignore storage write failures.
+  }
+}
+
+function initializeDateRangeInputs() {
+  const startEl = document.getElementById('startDate');
+  const endEl = document.getElementById('endDate');
+  if (!startEl || !endEl) return;
+
+  if (!TP.minDate || !TP.maxDate) {
+    startEl.value = '';
+    endEl.value = '';
+    return;
+  }
+
+  const today = todayIsoDate();
+  const endMaxDate = today > TP.maxDate ? today : TP.maxDate;
+
+  startEl.min = TP.minDate;
+  startEl.max = TP.maxDate;
+  endEl.min = TP.minDate;
+  endEl.max = endMaxDate;
+
+  let startValue = TP.minDate;
+  let endValue = TP.maxDate;
+  const prefs = loadDatePrefs();
+  if (prefs) {
+    const persistedStart = clampIsoDate(prefs.startDate, TP.minDate, TP.maxDate);
+    if (persistedStart) startValue = persistedStart;
+
+    const inferredPriorMax =
+      typeof prefs.sourceMaxDate === 'string' ? prefs.sourceMaxDate : TP.maxDate;
+    const inferRollingFromPriorMax =
+      typeof prefs.endDate === 'string'
+      && prefs.endDate === inferredPriorMax
+      && inferredPriorMax < today;
+
+    if (prefs.rollingEndDate || inferRollingFromPriorMax) {
+      endValue = today;
+    } else {
+      const persistedEnd = clampIsoDate(prefs.endDate, TP.minDate, endMaxDate);
+      if (persistedEnd) endValue = persistedEnd;
+    }
+  }
+
+  if (endValue > endMaxDate) endValue = endMaxDate;
+  if (startValue > TP.maxDate) startValue = TP.maxDate;
+  if (startValue > endValue) {
+    startValue = clampIsoDate(endValue, TP.minDate, TP.maxDate) || TP.minDate;
+  }
+
+  startEl.value = startValue;
+  endEl.value = endValue;
+  saveDatePrefs();
+}
 
 // === 3. Base Chart Options ===
 const baseChartOpts = {
@@ -848,17 +968,67 @@ function toggleChart(key) {
 }
 
 // === 14. Event Handlers ===
-document.getElementById('startDate').addEventListener('change', updateDashboard);
-document.getElementById('endDate').addEventListener('change', updateDashboard);
-document.getElementById('updateBtn').addEventListener('click', function() {
-  this.textContent = 'Refreshing...';
-  this.style.opacity = '0.5';
-  setTimeout(() => window.location.reload(), 200);
+function onDateRangeChanged() {
+  saveDatePrefs();
+  updateDashboard();
+}
+
+document.getElementById('startDate').addEventListener('change', onDateRangeChanged);
+document.getElementById('endDate').addEventListener('change', onDateRangeChanged);
+
+function initializeRefreshButton() {
+  const btn = document.getElementById('updateBtn');
+  btn.disabled = false;
+  btn.style.opacity = '0.8';
+  btn.classList.remove('loading');
+  if (LIVE_MODE) {
+    btn.textContent = 'Refresh Data';
+    btn.title = 'Collect latest usage data, then redraw this dashboard.';
+  } else {
+    btn.textContent = 'Reload';
+    btn.title = 'Reload this dashboard file. To pull new usage data, run tokenprint again in Terminal.';
+  }
+}
+
+document.getElementById('updateBtn').addEventListener('click', async function() {
+  saveDatePrefs();
+  const btn = this;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.classList.add('loading');
+  btn.textContent = LIVE_MODE ? 'Refreshing...' : 'Reloading...';
+
+  if (LIVE_MODE) {
+    try {
+      const resp = await fetch(REFRESH_ENDPOINT, {method: 'POST'});
+      let payload = {};
+      try { payload = await resp.json(); } catch (err) {}
+      if (!resp.ok || !payload.ok) throw new Error(payload.error || 'refresh failed');
+      window.location.reload();
+      return;
+    } catch (err) {
+      btn.textContent = 'Refresh Failed';
+      btn.style.opacity = '0.8';
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      setTimeout(() => {
+        initializeRefreshButton();
+      }, 1800);
+      return;
+    }
+  }
+
+  setTimeout(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('_tp_refresh', String(Date.now()));
+    window.location.replace(url.toString());
+  }, 200);
 });
 function resetDates() {
   if (!RAW.length) return;
   document.getElementById('startDate').value = RAW[0].d;
-  document.getElementById('endDate').value = RAW[RAW.length - 1].d;
+  document.getElementById('endDate').value = TP.maxDate;
+  saveDatePrefs();
   updateDashboard();
 }
 
@@ -1108,11 +1278,9 @@ TP.providers.forEach(p => {
     });
 })();
 
-// Initialize date inputs
-const _si = document.getElementById('startDate');
-const _ei = document.getElementById('endDate');
-_si.value = TP.minDate; _si.min = TP.minDate; _si.max = TP.maxDate;
-_ei.value = TP.maxDate; _ei.min = TP.minDate; _ei.max = TP.maxDate;
+// Initialize date inputs (with persisted defaults)
+initializeDateRangeInputs();
+initializeRefreshButton();
 
 // Set generation timestamp (from Python generation time, not browser open time)
 setText('genTime', 'Generated ' + TP.generatedAt);
