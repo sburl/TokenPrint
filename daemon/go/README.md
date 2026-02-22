@@ -1,24 +1,49 @@
-# tokenprintd (Go prototype)
+# tokenprintd (Go)
 
-This is a prototype local daemon for TokenPrint.
+Local daemon for TokenPrint with live browser refresh support.
+
+## What it does
+
+- Runs an initial `tokenprint` collection on startup
+- Serves the generated dashboard HTML
+- Exposes a refresh API that reruns collection without restarting the daemon
+- Uses `--live-mode` so the dashboard's refresh button calls the daemon API
 
 ## Endpoints
-- `GET /` -> serves generated dashboard HTML
-- `GET /api/status` -> health check
-- `POST /api/refresh` -> reruns `tokenprint` and returns JSON
 
-## Run (once Go is installed)
+- `GET /` and `GET /index.html`: serve dashboard HTML
+- `GET /api/status`: daemon status JSON
+- `POST /api/refresh` (or custom path): trigger recollection
+
+## Run
 
 ```bash
-go run ./daemon/go/main.go --port 8765
+go run ./daemon/go --port 8765
 ```
 
-Options:
-- `--tokenprint`: path to tokenprint binary
-- `--output`: output HTML path (default `/tmp/tokenprint.html` on macOS)
-- `--no-cache`: pass `--no-cache` to tokenprint
-- `--since`, `--until`: optional date filters
+## Key flags
 
-## Notes
-- This is a spike, not yet integrated into the Python CLI.
-- Next steps: add tests, auth token for refresh endpoint, and graceful shutdown.
+- `--host` bind host (default `127.0.0.1`)
+- `--port` bind port (default `8765`)
+- `--output` dashboard output path (default temp `tokenprint.html`)
+- `--tokenprint-bin` tokenprint binary path (default `tokenprint`)
+- `--since`, `--until` optional date bounds (`YYYYMMDD`)
+- `--no-cache` force full recollection
+- `--refresh-path` custom refresh endpoint path (default `/api/refresh`)
+- `--timeout` refresh timeout (default `10m`)
+- `--refresh-token` optional shared token for refresh auth (`X-Tokenprint-Token`)
+- `--no-open` do not auto-open browser
+
+## Example with refresh token
+
+```bash
+go run ./daemon/go --refresh-token local-dev-secret
+curl -X POST http://127.0.0.1:8765/api/refresh \
+  -H 'X-Tokenprint-Token: local-dev-secret'
+```
+
+## Test
+
+```bash
+go test ./daemon/go
+```

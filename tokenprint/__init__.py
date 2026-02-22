@@ -847,6 +847,8 @@ def main() -> None:
     parser.add_argument("--since", help="Start date (YYYYMMDD)")
     parser.add_argument("--until", help="End date (YYYYMMDD)")
     parser.add_argument("--no-cache", action="store_true", help="Force full refresh (ignore incremental cache)")
+    parser.add_argument("--live-mode", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--refresh-endpoint", default="/api/refresh", help=argparse.SUPPRESS)
     parser.add_argument("--serve", action="store_true", help="Run live local server with UI-triggered refresh")
     parser.add_argument("--host", default="127.0.0.1", help="Host for --serve (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="Port for --serve (default: 8765)")
@@ -875,7 +877,11 @@ def main() -> None:
         print("Make sure ccusage is installed: npm i -g ccusage", file=sys.stderr)
         sys.exit(1)
 
-    config = compute_dashboard_data(merged)
+    config = compute_dashboard_data(
+        merged,
+        live_mode=args.live_mode,
+        refresh_endpoint=args.refresh_endpoint if args.live_mode else "",
+    )
     html = _render_html_from_config(config)
     output_path = args.output or _default_output_path()
     _write_html_file(output_path, html)

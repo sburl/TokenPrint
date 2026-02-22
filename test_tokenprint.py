@@ -861,6 +861,31 @@ class TestMain:
         finally:
             os.unlink(output_path)
 
+    @patch("tokenprint.webbrowser.open")
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    @patch("tokenprint.collect_gemini_data", return_value={})
+    @patch("tokenprint.collect_codex_data", return_value={})
+    @patch("tokenprint.collect_claude_data", return_value={
+        "2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 50,
+                       "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0.01}
+    })
+    def test_live_mode_flags_rendered(self, mock_claude, mock_codex, mock_gemini, mock_user, mock_browser):
+        """--live-mode should embed live config for external daemon refresh endpoint."""
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            output_path = f.name
+        try:
+            with patch(
+                "sys.argv",
+                ["tokenprint", "--no-open", "--output", output_path, "--live-mode", "--refresh-endpoint", "/api/refresh"],
+            ):
+                main()
+            with open(output_path) as f:
+                html = f.read()
+            assert '"liveMode": true' in html
+            assert '"refreshEndpoint": "/api/refresh"' in html
+        finally:
+            os.unlink(output_path)
+
     @patch("tokenprint.collect_gemini_data", return_value={})
     @patch("tokenprint.collect_codex_data", return_value={})
     @patch("tokenprint.collect_claude_data", return_value={})
