@@ -292,6 +292,7 @@ const PROVIDER_COLORS = TP.providers.map(p => p.color);
 const PROVIDER_NAMES = TP.providers.map(p => p.displayName);
 const LIVE_MODE = Boolean(TP.liveMode);
 const REFRESH_ENDPOINT = TP.refreshEndpoint || '/api/refresh';
+const REFRESH_TOKEN = TP.refreshToken || '';
 // Energy model constants (single source of truth: Python passes via TP.energyModel)
 const EM = TP.energyModel;
 const ENERGY = {OUTPUT: EM.outputWhPerToken, INPUT: EM.inputWhPerToken, CACHE: EM.cachedWhPerToken, PUE: EM.pue, GRID: EM.gridLossFactor};
@@ -1000,7 +1001,8 @@ document.getElementById('updateBtn').addEventListener('click', async function() 
 
   if (LIVE_MODE) {
     try {
-      const resp = await fetch(REFRESH_ENDPOINT, {method: 'POST'});
+      const headers = REFRESH_TOKEN ? {'X-Tokenprint-Token': REFRESH_TOKEN} : {};
+      const resp = await fetch(REFRESH_ENDPOINT, {method: 'POST', headers});
       let payload = {};
       try { payload = await resp.json(); } catch (err) {}
       if (!resp.ok || !payload.ok) throw new Error(payload.error || 'refresh failed');

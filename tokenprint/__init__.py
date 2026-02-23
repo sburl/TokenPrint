@@ -531,8 +531,6 @@ def _collect_provider_data_incremental() -> dict[str, dict[str, dict[str, Any]]]
     today_compact = datetime.now().strftime("%Y%m%d")
     cached_provider_data = _load_provider_cache()
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
-    all_cached_dates = [d for pdata in cached_provider_data.values() for d in pdata]
-    global_next_day = _next_day_compact(max(all_cached_dates)) if all_cached_dates else None
 
     for p in PROVIDERS:
         print(f"  {p.label}...", file=sys.stderr)
@@ -541,13 +539,8 @@ def _collect_provider_data_incremental() -> dict[str, dict[str, dict[str, Any]]]
         fresh_days: dict[str, dict[str, Any]] = {}
 
         if not cached_days:
-            if global_next_day and global_next_day <= today_compact:
-                print(f"    incremental since {global_next_day}", file=sys.stderr)
-                fresh_days = collector(global_next_day, today_compact)
-            elif global_next_day and global_next_day > today_compact:
-                print("    up to date (cache)", file=sys.stderr)
-            else:
-                fresh_days = collector(None, None)
+            # No prior cache for this provider — fetch full history.
+            fresh_days = collector(None, None)
             combined_days = dict(fresh_days)
         else:
             latest_cached = max(cached_days.keys())
@@ -634,6 +627,7 @@ def compute_dashboard_data(
     github_username: str | None = None,
     live_mode: bool = False,
     refresh_endpoint: str | None = None,
+    refresh_token: str = "",
 ) -> dict[str, Any]:
     """Compute the config dict that the HTML template needs."""
     if github_username is None:
@@ -678,6 +672,7 @@ def compute_dashboard_data(
         "generatedAt": datetime.now().strftime("%m/%d/%Y, %I:%M %p"),
         "liveMode": live_mode,
         "refreshEndpoint": refresh_endpoint or "",
+        "refreshToken": refresh_token,
         "energyModel": {
             "outputWhPerToken": ENERGY_PER_OUTPUT_TOKEN_WH,
             "inputWhPerToken": ENERGY_PER_INPUT_TOKEN_WH,
@@ -732,11 +727,11 @@ def _collect_merged_usage_data(since: str | None, until: str | None, no_cache: b
         print("Collecting AI usage data...")
         provider_data = _collect_provider_data(since, until)
 
-    if is_default_range:
-        _save_provider_cache(provider_data)
-
     if not any(provider_data.values()):
         raise RuntimeError("No usage data found from any source.")
+
+    if is_default_range:
+        _save_provider_cache(provider_data)
 
     merged = merge_data(provider_data)
     print(f"\nMerged: {len(merged)} days of data", file=sys.stderr)
@@ -808,6 +803,13 @@ def _serve_dashboard(args: argparse.Namespace) -> None:
                 self._send_json(404, {"ok": False, "error": "not_found"})
                 return
 
+            # CSRF: if Origin is present it must match our loopback origin.
+            origin = self.headers.get("Origin", "")
+            allowed_origins = {f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"}
+            if origin and origin not in allowed_origins:
+                self._send_json(403, {"ok": False, "error": "forbidden"})
+                return
+
             acquired = state_lock.acquire(blocking=False)
             if not acquired:
                 self._send_json(409, {"ok": False, "error": "refresh_in_progress"})
@@ -849,6 +851,7 @@ def main() -> None:
     parser.add_argument("--no-cache", action="store_true", help="Force full refresh (ignore incremental cache)")
     parser.add_argument("--live-mode", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--refresh-endpoint", default="/api/refresh", help=argparse.SUPPRESS)
+    parser.add_argument("--refresh-token", default="", help=argparse.SUPPRESS)
     parser.add_argument("--serve", action="store_true", help="Run live local server with UI-triggered refresh")
     parser.add_argument("--host", default="127.0.0.1", help="Host for --serve (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="Port for --serve (default: 8765)")
@@ -881,6 +884,7 @@ def main() -> None:
         merged,
         live_mode=args.live_mode,
         refresh_endpoint=args.refresh_endpoint if args.live_mode else "",
+        refresh_token=args.refresh_token if args.live_mode else "",
     )
     html = _render_html_from_config(config)
     output_path = args.output or _default_output_path()

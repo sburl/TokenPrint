@@ -87,6 +87,9 @@ func buildRunner(cfg Config) func(context.Context) error {
 	cfg = normalizeConfig(cfg)
 	return func(ctx context.Context) error {
 		args := []string{"--no-open", "--output", cfg.OutputPath, "--live-mode", "--refresh-endpoint", cfg.RefreshPath}
+		if cfg.RefreshToken != "" {
+			args = append(args, "--refresh-token", cfg.RefreshToken)
+		}
 		if cfg.NoCache {
 			args = append(args, "--no-cache")
 		}
@@ -207,9 +210,31 @@ func (a *App) indexHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
+// originAllowed returns true when the Origin header is absent (non-browser client)
+// or matches a loopback origin on our port (same-origin browser request).
+func (a *App) originAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	allowed := []string{
+		fmt.Sprintf("http://127.0.0.1:%d", a.cfg.Port),
+		fmt.Sprintf("http://localhost:%d", a.cfg.Port),
+	}
+	for _, o := range allowed {
+		if origin == o {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method_not_allowed"})
+		return
+	}
+	if !a.originAllowed(r.Header.Get("Origin")) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "forbidden"})
 		return
 	}
 	if a.cfg.RefreshToken != "" {

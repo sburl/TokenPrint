@@ -167,6 +167,35 @@ func TestRefreshHandlerTimeoutMapsToGatewayTimeout(t *testing.T) {
 	}
 }
 
+func TestRefreshHandlerBlocksCrossOrigin(t *testing.T) {
+	app := newApp(Config{Port: 8765}, func(context.Context) error { return nil })
+	handler := app.handler()
+
+	// Cross-origin browser request → 403.
+	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-origin, got %d", rr.Code)
+	}
+
+	// Same-origin browser request → 200.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	req2.Header.Set("Origin", "http://127.0.0.1:8765")
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for same-origin, got %d", rr2.Code)
+	}
+
+	// No Origin header (curl / programmatic) → 200.
+	status, body, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", "")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200 for no-origin client, got %d body=%s", status, body)
+	}
+}
+
 func performRequest(t *testing.T, handler http.Handler, method string, path string, token string) (int, string, http.Header) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)

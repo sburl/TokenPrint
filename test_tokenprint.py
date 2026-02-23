@@ -682,9 +682,11 @@ class TestCollectProviderDataIncremental:
 
         out = _collect_provider_data_incremental()
 
+        # Claude has cache through yesterday → incremental fetch from today.
         mock_claude.assert_called_once_with(today_compact, today_compact)
-        mock_codex.assert_called_once_with(today_compact, today_compact)
-        mock_gemini.assert_called_once_with(today_compact, today_compact)
+        # Codex and Gemini have no cache → full history fetch, not the global-max shortcut.
+        mock_codex.assert_called_once_with(None, None)
+        mock_gemini.assert_called_once_with(None, None)
         assert yesterday_iso in out["claude"]
         assert today_iso in out["claude"]
 
