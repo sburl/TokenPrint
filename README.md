@@ -16,10 +16,11 @@ bash install.sh
 pipx install -e .
 
 # Run
-tokenprint                # Opens dashboard in browser
+tokenprint                # One-shot static report
+tokenprint --serve        # Live dashboard (UI refresh reruns data collection)
 ```
 
-Or install manually: `npm i -g ccusage` for Claude data. Codex works via `npx` (no install). Gemini is optional.
+Or install manually: `npm i -g ccusage @ccusage/codex@18` for Claude/Codex data. Gemini is optional.
 
 ## What You Get
 
@@ -31,6 +32,7 @@ An interactive dark-mode dashboard with:
 - **Cost matrix** — Monthly cost breakdown by provider with token tooltips
 - **Environmental impact cards** — Energy (Wh/kWh/MWh), carbon (g/kg/tonnes), water (mL/L), electricity cost
 - **Real-world equivalents** — Burritos, stacked Bibles, Tesla miles, showers, flights, gas car miles
+- **Incremental collection** — Default reruns fetch only new days per provider (fast daily refreshes)
 
 ### Charts
 
@@ -50,17 +52,24 @@ tokenprint --until 20260215                     # To date
 tokenprint --since 20260201 --until 20260215    # Date range
 tokenprint --no-open                            # Generate without opening
 tokenprint --output ~/report.html               # Custom output path
+tokenprint --no-cache                           # Force full refresh (ignore incremental cache)
+tokenprint --serve                              # Start local live server on http://127.0.0.1:8765
+tokenprint --serve --port 8877                  # Live server on custom port
 ```
 
-The default output is `/tmp/tokenprint.html` — a fixed path so you can re-run and Command-R to refresh.
+The default static output is `/tmp/tokenprint.html` — a fixed path so you can re-run and reload the file.
+In `--serve` mode, the UI **Refresh Data** button triggers a real backend recollection run, shows a spinner, then auto-reloads with new data.
+TokenPrint also keeps a local provider cache in your temp directory (for example `/tmp/tokenprint-provider-cache-v1.json`) and, by default, only fetches days after each provider's last collected date. Use `--no-cache` for a full rebuild.
 
 ## Data Sources
 
 | Provider | Source | Install |
 |----------|--------|---------|
 | Claude Code | `ccusage daily --json` | `npm i -g ccusage` |
-| Codex CLI | `npx @ccusage/codex@18 daily --json` | None (runs via npx) |
+| Codex CLI | `ccusage-codex daily --json` | `npm i -g @ccusage/codex@18` |
 | Gemini CLI | `~/.gemini/telemetry.log` | One-time setup (see below) |
+
+If `ccusage` returns `cost: 0` for newer Claude models, TokenPrint applies a model-rate fallback (from Anthropic published pricing) so daily totals are not undercounted.
 
 ### Gemini CLI Setup (Optional)
 
