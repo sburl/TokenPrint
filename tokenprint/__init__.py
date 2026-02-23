@@ -531,7 +531,7 @@ def _collect_provider_data_incremental() -> dict[str, dict[str, dict[str, Any]]]
     today_compact = datetime.now().strftime("%Y%m%d")
     cached_provider_data = _load_provider_cache()
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
-    all_cached_dates = [d for pdata in cached_provider_data.values() for d in pdata.keys()]
+    all_cached_dates = [d for pdata in cached_provider_data.values() for d in pdata]
     global_next_day = _next_day_compact(max(all_cached_dates)) if all_cached_dates else None
 
     for p in PROVIDERS:

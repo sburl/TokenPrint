@@ -2,8 +2,6 @@
 
 import json
 import os
-import subprocess
-import sys
 import tempfile
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -11,35 +9,34 @@ from unittest.mock import patch
 import pytest
 
 from tokenprint import (
-    _safe_int,
-    _next_day_compact,
-    _load_provider_cache,
-    _save_provider_cache,
+    CARBON_INTENSITY,
+    EMBODIED_CARBON_FACTOR,
+    ENERGY_PER_CACHED_TOKEN_WH,
+    ENERGY_PER_INPUT_TOKEN_WH,
+    ENERGY_PER_OUTPUT_TOKEN_WH,
+    GRID_LOSS_FACTOR,
+    PROVIDERS,
+    PUE,
+    WATER_USE_EFFICIENCY,
     _collect_provider_data_incremental,
-    _parse_date_flexible,
     _json_dumps_html_safe,
-    calculate_energy,
+    _load_provider_cache,
+    _next_day_compact,
+    _parse_date_flexible,
+    _safe_int,
+    _save_provider_cache,
     calculate_carbon,
+    calculate_energy,
     calculate_water,
-    merge_data,
-    compute_dashboard_data,
-    generate_html,
     collect_claude_data,
     collect_codex_data,
     collect_gemini_data,
-    run_command,
+    compute_dashboard_data,
     detect_github_username,
+    generate_html,
     main,
-    ProviderConfig,
-    PROVIDERS,
-    ENERGY_PER_OUTPUT_TOKEN_WH,
-    ENERGY_PER_INPUT_TOKEN_WH,
-    ENERGY_PER_CACHED_TOKEN_WH,
-    PUE,
-    GRID_LOSS_FACTOR,
-    CARBON_INTENSITY,
-    EMBODIED_CARBON_FACTOR,
-    WATER_USE_EFFICIENCY,
+    merge_data,
+    run_command,
 )
 
 
@@ -898,15 +895,13 @@ class TestMain:
 
     def test_invalid_since_date(self):
         """--since with bad format should error."""
-        with patch("sys.argv", ["tokenprint", "--since", "not-a-date"]):
-            with pytest.raises(SystemExit):
-                main()
+        with patch("sys.argv", ["tokenprint", "--since", "not-a-date"]), pytest.raises(SystemExit):
+            main()
 
     def test_invalid_calendar_date(self):
         """--since with impossible calendar date should error."""
-        with patch("sys.argv", ["tokenprint", "--since", "20261345"]):
-            with pytest.raises(SystemExit):
-                main()
+        with patch("sys.argv", ["tokenprint", "--since", "20261345"]), pytest.raises(SystemExit):
+            main()
 
     @patch("tokenprint.webbrowser.open")
     @patch("tokenprint.detect_github_username", return_value="testuser")
