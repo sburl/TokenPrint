@@ -7,7 +7,7 @@ and Gemini CLI (OpenTelemetry logs), then generates an interactive HTML dashboar
 showing usage trends, costs, and estimated environmental impact.
 
 Usage:
-    tokenprint [--since YYYYMMDD] [--until YYYYMMDD] [--no-cache] [--serve] [--no-open] [--output PATH]
+    tokenprint [--since YYYYMMDD] [--until YYYYMMDD] [--no-cache] [--no-open] [--output PATH]
 """
 
 from __future__ import annotations
@@ -19,15 +19,12 @@ import re
 import subprocess
 import sys
 import tempfile
-import threading
 import webbrowser
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -738,111 +735,6 @@ def _collect_merged_usage_data(since: str | None, until: str | None, no_cache: b
     return merged
 
 
-def _serve_dashboard(args: argparse.Namespace) -> None:
-    """Run local live dashboard server with UI-triggered refresh."""
-    refresh_path = "/api/refresh"
-    open_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
-    base_url = f"http://{open_host}:{args.port}"
-    output_path = args.output or _default_output_path()
-    state_lock = threading.Lock()
-    github_username = detect_github_username()
-    state: dict[str, str] = {"html": ""}
-
-    def rebuild_dashboard() -> dict[str, Any]:
-        merged = _collect_merged_usage_data(args.since, args.until, args.no_cache)
-        config = compute_dashboard_data(
-            merged,
-            github_username=github_username,
-            live_mode=True,
-            refresh_endpoint=refresh_path,
-        )
-        html = _render_html_from_config(config)
-        state["html"] = html
-        _write_html_file(output_path, html)
-        return config
-
-    # Initial build before serving.
-    rebuild_dashboard()
-
-    class DashboardHandler(BaseHTTPRequestHandler):
-        def log_message(self, fmt: str, *args_log: Any) -> None:
-            # Keep HTTP noise out of terminal.
-            return
-
-        def _send_json(self, status: int, payload: dict[str, Any]) -> None:
-            raw = json.dumps(payload).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(raw)))
-            self.end_headers()
-            self.wfile.write(raw)
-
-        def _send_html(self, status: int, html: str) -> None:
-            raw = html.encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(raw)))
-            self.end_headers()
-            self.wfile.write(raw)
-
-        def do_GET(self) -> None:
-            path = urlparse(self.path).path
-            if path in {"/", "/index.html"}:
-                with state_lock:
-                    html = state["html"]
-                self._send_html(200, html)
-                return
-            if path == "/api/status":
-                self._send_json(200, {"ok": True})
-                return
-            self._send_json(404, {"ok": False, "error": "not_found"})
-
-        def do_POST(self) -> None:
-            path = urlparse(self.path).path
-            if path != refresh_path:
-                self._send_json(404, {"ok": False, "error": "not_found"})
-                return
-
-            # CSRF: if Origin is present it must match our loopback origin.
-            origin = self.headers.get("Origin", "")
-            allowed_origins = {f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"}
-            if origin and origin not in allowed_origins:
-                self._send_json(403, {"ok": False, "error": "forbidden"})
-                return
-
-            acquired = state_lock.acquire(blocking=False)
-            if not acquired:
-                self._send_json(409, {"ok": False, "error": "refresh_in_progress"})
-                return
-
-            try:
-                try:
-                    config = rebuild_dashboard()
-                    self._send_json(200, {"ok": True, "generatedAt": config.get("generatedAt", "")})
-                except RuntimeError as err:
-                    self._send_json(500, {"ok": False, "error": str(err)})
-            finally:
-                state_lock.release()
-
-    try:
-        server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
-    except OSError as err:
-        print(f"Could not start server on {args.host}:{args.port}: {err}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Live dashboard at {base_url}")
-    print(f"Snapshot file: {output_path}")
-    print("Press Ctrl-C to stop.")
-    if not args.no_open:
-        webbrowser.open(base_url)
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped live dashboard.")
-    finally:
-        server.server_close()
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate AI usage & impact dashboard")
@@ -852,9 +744,6 @@ def main() -> None:
     parser.add_argument("--live-mode", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--refresh-endpoint", default="/api/refresh", help=argparse.SUPPRESS)
     parser.add_argument("--refresh-token", default="", help=argparse.SUPPRESS)
-    parser.add_argument("--serve", action="store_true", help="Run live local server with UI-triggered refresh")
-    parser.add_argument("--host", default="127.0.0.1", help="Host for --serve (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8765, help="Port for --serve (default: 8765)")
     parser.add_argument("--no-open", action="store_true", help="Don't open in browser")
     parser.add_argument("--output", help="Output HTML path")
     args = parser.parse_args()
@@ -868,10 +757,6 @@ def main() -> None:
                 datetime.strptime(val, "%Y%m%d")
             except ValueError:
                 parser.error(f"--{name} is not a valid date (got: {val})")
-
-    if args.serve:
-        _serve_dashboard(args)
-        return
 
     try:
         merged = _collect_merged_usage_data(args.since, args.until, args.no_cache)

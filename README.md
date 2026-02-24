@@ -15,9 +15,11 @@ bash install.sh
 # Install CLI
 pipx install -e .
 
-# Run
-tokenprint                # One-shot static report
-tokenprint --serve        # Live dashboard (UI refresh reruns data collection)
+# Run (one-shot)
+tokenprint
+
+# Run (live dashboard with auto-refresh)
+go run ./daemon/go
 ```
 
 Or install manually: `npm i -g ccusage @ccusage/codex@18` for Claude/Codex data. Gemini is optional.
@@ -53,13 +55,21 @@ tokenprint --since 20260201 --until 20260215    # Date range
 tokenprint --no-open                            # Generate without opening
 tokenprint --output ~/report.html               # Custom output path
 tokenprint --no-cache                           # Force full refresh (ignore incremental cache)
-tokenprint --serve                              # Start local live server on http://127.0.0.1:8765
-tokenprint --serve --port 8877                  # Live server on custom port
 ```
 
-The default static output is `/tmp/tokenprint.html` — a fixed path so you can re-run and reload the file.
-In `--serve` mode, the UI **Refresh Data** button triggers a real backend recollection run, shows a spinner, then auto-reloads with new data.
-TokenPrint also keeps a local provider cache in your temp directory (for example `/tmp/tokenprint-provider-cache-v1.json`) and, by default, only fetches days after each provider's last collected date. Use `--no-cache` for a full rebuild.
+The default output is `/tmp/tokenprint.html`. TokenPrint keeps a provider cache in your temp directory (`/tmp/tokenprint-provider-cache-v1.json`) and by default only fetches days after each provider's last collected date. Use `--no-cache` for a full rebuild.
+
+### Live Dashboard (Go Daemon)
+
+For a persistent live dashboard where the **Refresh Data** button reruns collection without restarting:
+
+```bash
+go run ./daemon/go               # http://127.0.0.1:8765
+go run ./daemon/go --port 8877   # custom port
+go run ./daemon/go --refresh-token mysecret  # optional auth token
+```
+
+The daemon runs `tokenprint` on startup, serves the dashboard, and handles refresh requests. See [`daemon/go/README.md`](daemon/go/README.md) for all flags.
 
 ## Data Sources
 

@@ -752,12 +752,6 @@ class TestGenerateHtml:
 # --- main() ---
 
 class TestMain:
-    @patch("tokenprint._serve_dashboard")
-    def test_serve_mode_dispatch(self, mock_serve):
-        with patch("sys.argv", ["tokenprint", "--serve", "--no-open"]):
-            main()
-        mock_serve.assert_called_once()
-
     @patch("tokenprint._save_provider_cache")
     @patch("tokenprint._collect_provider_data")
     @patch("tokenprint._collect_provider_data_incremental")

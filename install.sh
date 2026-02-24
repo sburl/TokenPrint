@@ -9,21 +9,28 @@ set -e
 echo "=== TokenPrint Setup ==="
 echo ""
 
-# --- 1. Check Python ---
+# --- 1. Check Go ---
+if ! command -v go &>/dev/null; then
+    echo "[error] go is required but not found. Install: https://go.dev/dl/"
+    exit 1
+fi
+echo "[ok] go found: $(go version 2>&1)"
+
+# --- 2. Check Python ---
 if ! command -v python3 &>/dev/null; then
     echo "[error] python3 is required but not found."
     exit 1
 fi
 echo "[ok] python3 found: $(python3 --version 2>&1)"
 
-# --- 2. Check Node/npm ---
+# --- 3. Check Node/npm ---
 if ! command -v npm &>/dev/null; then
     echo "[error] npm is required but not found. Install Node.js: https://nodejs.org"
     exit 1
 fi
 echo "[ok] npm found: $(npm --version 2>&1)"
 
-# --- 3. Install ccusage (Claude Code usage tracking) ---
+# --- 4. Install ccusage (Claude Code usage tracking) ---
 echo ""
 echo "--- Claude Code (ccusage) ---"
 if command -v ccusage &>/dev/null; then
@@ -34,7 +41,7 @@ else
     echo "[ok] ccusage installed"
 fi
 
-# --- 4. Install @ccusage/codex (Codex CLI usage tracking) ---
+# --- 5. Install @ccusage/codex (Codex CLI usage tracking) ---
 echo ""
 echo "--- Codex CLI (@ccusage/codex) ---"
 # Install globally so tokenprint can run offline/quickly without npx network fetches.
@@ -46,7 +53,7 @@ else
     echo "[ok] @ccusage/codex installed"
 fi
 
-# --- 5. Setup Gemini CLI telemetry ---
+# --- 6. Setup Gemini CLI telemetry ---
 echo ""
 echo "--- Gemini CLI (telemetry) ---"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -56,7 +63,7 @@ else
     echo "[warn] setup-gemini-telemetry.sh not found. Skipping Gemini setup."
 fi
 
-# --- 6. Verify GitHub CLI (optional, for share image username) ---
+# --- 7. Verify GitHub CLI (optional, for share image username) ---
 echo ""
 echo "--- GitHub CLI (optional) ---"
 if command -v gh &>/dev/null; then
@@ -75,16 +82,22 @@ echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Run TokenPrint:"
-echo "  pipx install -e .   # one-time CLI install"
-echo "  tokenprint           # run dashboard"
+echo "  pipx install -e .      # one-time Python CLI install"
+echo "  tokenprint             # one-shot dashboard (opens in browser)"
 echo ""
-echo "Options:"
+echo "Run Live Dashboard (Go daemon):"
+echo "  go run ./daemon/go     # http://127.0.0.1:8765 (auto-opens browser)"
+echo ""
+echo "tokenprint options:"
 echo "  --since YYYYMMDD    Start date filter"
 echo "  --until YYYYMMDD    End date filter"
 echo "  --output PATH       Custom output path"
 echo "  --no-open           Don't open in browser"
 echo "  --no-cache          Force full refresh (ignore incremental cache)"
-echo "  --serve             Start local live dashboard server (UI can refresh data)"
-echo "  --port N            Port for --serve (default: 8765)"
+echo ""
+echo "daemon/go options:"
+echo "  --port N            Port (default: 8765)"
+echo "  --refresh-token T   Optional auth token for refresh endpoint"
+echo "  --no-open           Don't auto-open browser"
 echo ""
 echo "Note: Gemini telemetry only tracks future sessions — no historical backfill."
