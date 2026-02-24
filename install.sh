@@ -63,7 +63,21 @@ else
     echo "[warn] setup-gemini-telemetry.sh not found. Skipping Gemini setup."
 fi
 
-# --- 7. Verify GitHub CLI (optional, for share image username) ---
+# --- 7. Build tokenprintd (Go daemon) ---
+echo ""
+echo "--- tokenprintd (Go daemon) ---"
+INSTALL_DIR="$HOME/.local/bin"
+mkdir -p "$INSTALL_DIR"
+echo "Building tokenprintd..."
+go build -o "$INSTALL_DIR/tokenprintd" "$SCRIPT_DIR/daemon/go"
+echo "[ok] tokenprintd installed to $INSTALL_DIR/tokenprintd"
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    echo "[warn] $INSTALL_DIR is not in your PATH."
+    echo "       Add this to your shell profile (~/.zshrc or ~/.bashrc):"
+    echo "       export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
+
+# --- 8. Verify GitHub CLI (optional, for share image username) ---
 echo ""
 echo "--- GitHub CLI (optional) ---"
 if command -v gh &>/dev/null; then
@@ -86,7 +100,7 @@ echo "  pipx install -e .      # one-time Python CLI install"
 echo "  tokenprint             # one-shot dashboard (opens in browser)"
 echo ""
 echo "Run Live Dashboard (Go daemon):"
-echo "  go run ./daemon/go     # http://127.0.0.1:8765 (auto-opens browser)"
+echo "  tokenprintd            # http://127.0.0.1:8765 (auto-opens browser)"
 echo ""
 echo "tokenprint options:"
 echo "  --since YYYYMMDD    Start date filter"

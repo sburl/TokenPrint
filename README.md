@@ -19,7 +19,7 @@ pipx install -e .
 tokenprint
 
 # Run (live dashboard with auto-refresh)
-go run ./daemon/go
+tokenprintd
 ```
 
 Or install manually: `npm i -g ccusage @ccusage/codex@18` for Claude/Codex data. Gemini is optional.
@@ -64,12 +64,12 @@ The default output is `/tmp/tokenprint.html`. TokenPrint keeps a provider cache 
 For a persistent live dashboard where the **Refresh Data** button reruns collection without restarting:
 
 ```bash
-go run ./daemon/go               # http://127.0.0.1:8765
-go run ./daemon/go --port 8877   # custom port
-go run ./daemon/go --refresh-token mysecret  # optional auth token
+tokenprintd                          # http://127.0.0.1:8765
+tokenprintd --port 8877              # custom port
+tokenprintd --refresh-token mysecret # optional auth token
 ```
 
-The daemon runs `tokenprint` on startup, serves the dashboard, and handles refresh requests. See [`daemon/go/README.md`](daemon/go/README.md) for all flags.
+`install.sh` builds and installs `tokenprintd` to `~/.local/bin`. The daemon runs `tokenprint` on startup, serves the dashboard, and handles refresh requests. See [`daemon/go/README.md`](daemon/go/README.md) for all flags.
 
 ## Data Sources
 
