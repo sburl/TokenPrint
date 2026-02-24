@@ -69,7 +69,7 @@ echo "--- tokenprintd (Go daemon) ---"
 INSTALL_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR"
 echo "Building tokenprintd..."
-go build -o "$INSTALL_DIR/tokenprintd" "$SCRIPT_DIR/daemon/go"
+(cd "$SCRIPT_DIR/daemon/go" && go build -o "$INSTALL_DIR/tokenprintd" .)
 echo "[ok] tokenprintd installed to $INSTALL_DIR/tokenprintd"
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo "[warn] $INSTALL_DIR is not in your PATH."
