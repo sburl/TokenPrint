@@ -1,5 +1,8 @@
 # TokenPrint
 
+**Created:** 2026-02-23-17-42
+**Last Updated:** 2026-03-03-16-43
+
 Track the true cost of AI coding tools — tokens, dollars, energy, carbon, and water.
 
 TokenPrint collects usage data from **Claude Code**, **Codex CLI**, and **Gemini CLI**, then generates an interactive HTML dashboard with cost breakdowns, environmental impact estimates, and real-world equivalents.
@@ -117,6 +120,11 @@ If you use [CrossCheck](https://github.com/sburl/CrossCheck), TokenPrint is avai
 /ai-impact                    # Same as running tokenprint
 /ai-impact --since 20260201   # With date filter
 ```
+
+## Architecture
+
+For a deeper walkthrough of how collectors, cache persistence, merge/render flow,
+and daemon refresh interact, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## License
 
