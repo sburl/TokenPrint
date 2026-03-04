@@ -91,6 +91,7 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Run full Python checks
         run: |
+          set -o pipefail
           ./.github/scripts/ci-shell-syntax-check.sh
           ruff check .
           ruff format --check .
@@ -129,6 +130,7 @@ jobs:
       - name: Go vulnerability audit
         working-directory: daemon/go
         run: |
+          set -o pipefail
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go run golang.org/x/vuln/cmd/govulncheck ./... | tee go-vulncheck-output.txt
       - name: Secret pattern scan

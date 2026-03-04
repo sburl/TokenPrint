@@ -3,7 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-mapfile -t scripts < <(git ls-files '*.sh')
+scripts=()
+while IFS= read -r script; do
+  scripts+=("$script")
+done < <(git ls-files '*.sh')
 if (( ${#scripts[@]} == 0 )); then
   echo "No shell scripts found; skipping shell syntax check."
   exit 0
