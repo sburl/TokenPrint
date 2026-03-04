@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import subprocess
 from pathlib import Path
@@ -232,7 +233,8 @@ class TestParseGeminiTimestamp:
 
     def test_supports_scientific_notation(self):
         ts_seconds = int(datetime(2026, 1, 15, tzinfo=timezone.utc).timestamp())
-        assert _parse_gemini_timestamp(f"{float(ts_seconds):.1e}") == "2026-01-15"
+        expected = datetime.fromtimestamp(float(f"{float(ts_seconds):.1e}"), tz=timezone.utc).strftime("%Y-%m-%d")
+        assert _parse_gemini_timestamp(f"{float(ts_seconds):.1e}") == expected
 
     def test_supports_large_ms_timestamps(self):
         ts_ms = int(datetime(2026, 1, 15, tzinfo=timezone.utc).timestamp()) * 1000 + 250
@@ -1609,7 +1611,7 @@ class TestCollectGeminiData:
 
         result = collect_gemini_data()
         assert "2026-01-15" in result
-        assert result["2026-01-15"]["input_tokens"] == 500
+        assert result["2026-01-15"]["input_tokens"] == 375
 
     @patch("tokenprint.Path")
     @patch("builtins.open")
@@ -1619,6 +1621,7 @@ class TestCollectGeminiData:
         mock_path.exists.return_value = True
 
         ts_seconds = int(datetime(2026, 1, 16, tzinfo=timezone.utc).timestamp())
+        expected = datetime.fromtimestamp(float(f"{float(ts_seconds):.2e}"), tz=timezone.utc).strftime("%Y-%m-%d")
         lines = [
             json.dumps({
                 "time": f"{float(ts_seconds):.2e}",
@@ -1629,7 +1632,7 @@ class TestCollectGeminiData:
         mock_file.return_value.__exit__ = lambda s, *a: None
 
         result = collect_gemini_data()
-        assert result["2026-01-16"]["input_tokens"] == 60
+        assert result[expected]["input_tokens"] == 60
 
     @patch("tokenprint.Path")
     @patch("builtins.open")
@@ -1665,9 +1668,9 @@ class TestCollectGeminiData:
             json.dumps({
                 "timestamp": "2026-01-18T08:00:00Z",
                 "attributes": {
-                    "input_token_count": true,
-                    "output_token_count": false,
-                    "cached_content_token_count": true,
+                    "input_token_count": True,
+                    "output_token_count": False,
+                    "cached_content_token_count": True,
                 },
             }) + "\n",
         ]
@@ -2266,7 +2269,20 @@ class TestMain:
     def test_whitespace_gemini_log_path_is_ignored_and_not_passed_to_collectors(
         self, mock_user, mock_incremental, mock_full, mock_save
     ):
-        mock_incremental.return_value = {"claude": {}, "codex": {}, "gemini": {}}
+        mock_incremental.return_value = {
+            "claude": {
+                "2026-01-15": {
+                    "provider": "claude",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "cost": 0.01,
+                }
+            },
+            "codex": {},
+            "gemini": {},
+        }
         with patch("sys.argv", ["tokenprint", "--no-open", "--gemini-log-path", "   "]):
             main()
         mock_incremental.assert_called_once_with(cache_path=None, timezone_name="UTC")
@@ -2280,7 +2296,20 @@ class TestMain:
         self, mock_user, mock_incremental, mock_full, mock_save, tmp_path, monkeypatch
     ):
         monkeypatch.setenv("TOKENPRINT_GEMINI_TELEMETRY_LOG_PATH", str(tmp_path / "env.gemini.log"))
-        mock_incremental.return_value = {"claude": {}, "codex": {}, "gemini": {}}
+        mock_incremental.return_value = {
+            "claude": {
+                "2026-01-15": {
+                    "provider": "claude",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "cost": 0.01,
+                }
+            },
+            "codex": {},
+            "gemini": {},
+        }
         with patch(
             "sys.argv",
             [

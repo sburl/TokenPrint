@@ -522,10 +522,17 @@ def collect_gemini_data(
     since: str | None = None,
     until: str | None = None,
     timezone_name: str = "UTC",
+    gemini_log_path: str | None = None,
+    *,
     log_path: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Collect Gemini CLI usage from OpenTelemetry log."""
-    log_path = _resolve_gemini_log_path(log_path)
+    if log_path is not None and gemini_log_path is None:
+        gemini_log_path = log_path
+    if gemini_log_path is None:
+        log_path = _resolve_gemini_log_path()
+    else:
+        log_path = _resolve_gemini_log_path(gemini_log_path)
     if not log_path.exists():
         _warn(f"Gemini telemetry log not found: {log_path}")
         _warn("       Run: bash install.sh (or bash setup-gemini-telemetry.sh)")
@@ -575,8 +582,19 @@ def collect_gemini_data(
                 cached_tok = _safe_int(attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0)))
                 # Gemini input_token_count includes cached — subtract to get non-cached input
                 input_tok = max(0, raw_input - cached_tok)
+                has_token_fields = any(
+                    key in attrs
+                    for key in (
+                        "input_token_count",
+                        "output_token_count",
+                        "cached_content_token_count",
+                        "gen_ai.usage.input_tokens",
+                        "gen_ai.usage.output_tokens",
+                        "gen_ai.usage.cached_tokens",
+                    )
+                )
 
-                if input_tok or output_tok:
+                if input_tok or output_tok or cached_tok or has_token_fields:
                     daily[date]["input_tokens"] += input_tok
                     daily[date]["output_tokens"] += output_tok
                     daily[date]["cache_read_tokens"] += cached_tok
@@ -612,7 +630,7 @@ def _provider_cache_path() -> Path:
     return Path(tempfile.gettempdir()) / PROVIDER_CACHE_FILENAME
 
 
-def _empty_provider_cache() -> dict[str, dict[str, dict[str, Any]]:
+def _empty_provider_cache() -> dict[str, dict[str, dict[str, Any]]]:
     """Return a zero-value provider cache payload."""
     return {name: {} for name in provider_names()}
 
@@ -705,7 +723,11 @@ def _migrate_provider_payload(
 
 def _resolve_cache_path(cache_path: str | None) -> Path | None:
     """Resolve user-provided cache path into a concrete file path."""
-    resolved_path = (cache_path or os.environ.get(TOKENPRINT_CACHE_PATH_ENV_VAR, "")).strip()
+    normalized_cache_path = (cache_path or "").strip()
+    if normalized_cache_path:
+        resolved_path = normalized_cache_path
+    else:
+        resolved_path = os.environ.get(TOKENPRINT_CACHE_PATH_ENV_VAR, "").strip()
     if not resolved_path:
         return None
     path = Path(resolved_path).expanduser()
@@ -983,6 +1005,7 @@ def merge_data(
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "cache_read_tokens": cache_read_tokens,
+                    "cache_write_tokens": cache_write_tokens,
                     "cost": round(cost, 4),
                     "energy_wh": round(energy, 4),
                     "carbon_g": round(calculate_carbon(energy), 4),
@@ -991,6 +1014,7 @@ def merge_data(
             else:
                 row[name] = {
                     "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
                     "cost": 0, "energy_wh": 0, "carbon_g": 0, "water_ml": 0,
                 }
         merged.append(row)
@@ -1164,12 +1188,12 @@ def _collect_merged_usage_data(
     else:
         print("Collecting AI usage data...")
         if gemini_log_path is None:
-            provider_data = _collect_provider_data(since, until, timezone_name=timezone_name)
+            provider_data = _collect_provider_data(since, until, timezone_name)
         else:
             provider_data = _collect_provider_data(
                 since,
                 until,
-                timezone_name=timezone_name,
+                timezone_name,
                 gemini_log_path=gemini_log_path,
             )
 
@@ -1207,6 +1231,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.output is not None:
         args.output = args.output.strip() or None
+    if args.cache_path is not None:
+        args.cache_path = args.cache_path.strip() or None
     if args.refresh_endpoint is not None:
         args.refresh_endpoint = args.refresh_endpoint.strip() or "/api/refresh"
     if args.refresh_token is not None:
@@ -1221,7 +1247,7 @@ def main() -> None:
     if args.check:
         if not _run_cli_check():
             sys.exit(1)
-        return
+        sys.exit(0)
 
     # Validate date arguments (syntax + calendar validity), and ensure ranges are ordered.
     parsed_since = None
