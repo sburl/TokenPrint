@@ -3000,6 +3000,17 @@ class TestProviderRegistry:
 
     def test_resolve_provider_empty_is_none(self):
         assert resolve_provider("") is None
+
+    def test_resolve_provider_is_case_insensitive(self):
+        assert resolve_provider("Claude") is not None
+        assert resolve_provider("CODEX") is not None
+        assert resolve_provider("Gemini") is not None
+
+    def test_resolve_provider_trims_whitespace(self):
+        p = resolve_provider("  claude  ")
+        assert p is not None
+        assert p.name == "claude"
+
     def test_provider_names_helper_matches_registry_order(self):
         assert provider_names() == ("claude", "codex", "gemini")
 

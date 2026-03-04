@@ -75,6 +75,9 @@ def resolve_provider(identifier: str) -> ProviderConfig | None:
     """Resolve provider config by internal name or compact key."""
     if not identifier:
         return None
+    identifier = identifier.strip().lower()
+    if not identifier:
+        return None
     by_name = provider_by_name(identifier)
     if by_name is not None:
         return by_name
