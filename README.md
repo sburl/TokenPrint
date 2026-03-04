@@ -21,9 +21,6 @@ pipx install -e .
 # Run (one-shot)
 tokenprint
 
-# Or run directly as a module
-python -m tokenprint
-
 # Run (live dashboard with auto-refresh)
 tokenprintd
 ```
@@ -58,12 +55,9 @@ tokenprint                                      # Full history, opens in browser
 tokenprint --since 20260201                     # From date
 tokenprint --until 20260215                     # To date
 tokenprint --since 20260201 --until 20260215    # Date range
-tokenprint --since 2026-01-01                   # ISO date input
 tokenprint --no-open                            # Generate without opening
 tokenprint --output ~/report.html               # Custom output path
 tokenprint --no-cache                           # Force full refresh (ignore incremental cache)
-tokenprint --timezone America/Los_Angeles        # Bucket Gemini dates in a local timezone
-tokenprint --gemini-log-path ~/gemini/telemetry.log  # Read Gemini usage from an alternate telemetry source
 ```
 
 The default output is `/tmp/tokenprint.html`. TokenPrint keeps a provider cache in your temp directory (`/tmp/tokenprint-provider-cache-v1.json`) and by default only fetches days after each provider's last collected date. Use `--no-cache` for a full rebuild.
@@ -75,15 +69,8 @@ For a persistent live dashboard where the **Refresh Data** button reruns collect
 ```bash
 tokenprintd                          # http://127.0.0.1:8765
 tokenprintd --port 8877              # custom port
-tokenprintd --host ::1               # IPv6 loopback
-tokenprintd --refresh-token mysecret # required for non-loopback hosts
-tokenprintd --host 0.0.0.0 --refresh-token mysecret # public/wildcard host
-tokenprintd --cache-path /tmp/tokenprint-cache-v1.json # explicit cache location for daemon
-tokenprintd --gemini-log-path ~/gemini/telemetry.log --no-open # custom Gemini telemetry location
+tokenprintd --refresh-token mysecret # optional auth token
 ```
-
-Binding TokenPrint on any non-loopback host (for example `--host 0.0.0.0`) requires
-`--refresh-token` and the `X-Tokenprint-Token` header for refresh endpoint calls.
 
 `install.sh` builds and installs `tokenprintd` to `~/.local/bin`. The daemon runs `tokenprint` on startup, serves the dashboard, and handles refresh requests. See [`daemon/go/README.md`](daemon/go/README.md) for all flags.
 
@@ -93,7 +80,7 @@ Binding TokenPrint on any non-loopback host (for example `--host 0.0.0.0`) requi
 |----------|--------|---------|
 | Claude Code | `ccusage daily --json` | `npm i -g ccusage` |
 | Codex CLI | `ccusage-codex daily --json` | `npm i -g @ccusage/codex@18` |
-| Gemini CLI | `~/.gemini/telemetry.log` (override with `TOKENPRINT_GEMINI_TELEMETRY_LOG_PATH` or `--gemini-log-path`) | One-time setup (see below) |
+| Gemini CLI | `~/.gemini/telemetry.log` | One-time setup (see below) |
 
 If `ccusage` returns `cost: 0` for newer Claude models, TokenPrint applies a model-rate fallback (from Anthropic published pricing) so daily totals are not undercounted.
 
@@ -106,14 +93,6 @@ bash setup-gemini-telemetry.sh
 ```
 
 This adds telemetry config to `~/.gemini/settings.json`. Future Gemini CLI sessions will log token usage to `~/.gemini/telemetry.log`. Historical data cannot be backfilled — tracking starts from the point you enable it.
-
-You can point TokenPrint at a different log location by setting:
-
-```bash
-export TOKENPRINT_GEMINI_TELEMETRY_LOG_PATH=/absolute/path/to/telemetry.log
-```
-
-If set to a directory, TokenPrint will read from `<directory>/telemetry.log`.
 
 ## Energy & Carbon Model
 
@@ -140,31 +119,12 @@ If you use [CrossCheck](https://github.com/sburl/CrossCheck), TokenPrint is avai
 ```bash
 /ai-impact                    # Same as running tokenprint
 /ai-impact --since 20260201   # With date filter
-/ai-impact --since 2026-01-01  # ISO date support
-/ai-impact --output-format json --output /tmp/tokenprint.json
-/ai-impact --timezone America/Los_Angeles --output-format json
-``` 
+```
 
 ## Architecture
 
 For a deeper walkthrough of how collectors, cache persistence, merge/render flow,
 and daemon refresh interact, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
-
-## Command reference
-
-- `--version` prints the installed package version from metadata.
-- `--check` validates CLI prerequisites (template file and required collectors) before running.
-- `--since` and `--until` accept `YYYYMMDD` or `YYYY-MM-DD` date formats.
-- `--timezone` groups Gemini timestamps by an IANA timezone (defaults to `UTC`).
-- `--output-format` chooses output renderer (`html` or `json`; default is `html`).
-- `--output` sets the output path; defaults to:
-  - HTML: `{tempdir}/tokenprint.html`
-  - JSON: `{tempdir}/tokenprint.json`
-- `--no-open` suppresses browser launch for HTML output.
-- `--cache-path` overrides the provider cache file path (`tokenprint-provider-cache-v1.json` in temp by default, or set via `TOKENPRINT_CACHE_PATH`).
-- `--gemini-log-path` can point token collection to a custom Gemini telemetry log file or directory.
-- `TOKENPRINT_GEMINI_TELEMETRY_LOG_PATH` can point token collection to a custom log path without CLI flags.
-- `python -m tokenprint` is supported as an alternate invocation for scripting environments.
 
 ## License
 
