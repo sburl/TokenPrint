@@ -1,5 +1,8 @@
 # tokenprintd (Go)
 
+**Created:** 2026-02-23-17-42
+**Last Updated:** 2026-02-23-17-42
+
 Local daemon for TokenPrint with live browser refresh support.
 
 ## What it does

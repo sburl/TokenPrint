@@ -1,5 +1,8 @@
 # TokenPrint
 
+**Created:** 2026-02-23-17-42
+**Last Updated:** 2026-02-23-17-42
+
 Track the true cost of AI coding tools — tokens, dollars, energy, carbon, and water.
 
 TokenPrint collects usage data from **Claude Code**, **Codex CLI**, and **Gemini CLI**, then generates an interactive HTML dashboard with cost breakdowns, environmental impact estimates, and real-world equivalents.
