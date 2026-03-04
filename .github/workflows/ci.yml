@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python quick checks
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+      - name: Install package and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Shell script syntax checks
+        run: ./.github/scripts/ci-shell-syntax-check.sh
+      - name: Ruff lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Python unit tests
+        run: pytest -q
+
+  go:
+    name: Go unit tests
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Go tests
+        working-directory: daemon/go
+        run: go test ./...
+      - name: Go quality gates
+        working-directory: daemon/go
+        run: |
+          if [ -n "$(gofmt -s -l *.go)" ]; then
+            echo "gofmt check failed for:"
+            gofmt -s -l *.go
+            exit 1
+          fi
+          go vet ./...
+
+  nightly:
+    name: Nightly extended checks
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+      - name: Install package and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run full Python checks
+        run: |
+          ./.github/scripts/ci-shell-syntax-check.sh
+          ruff check .
+          ruff format --check .
+          pytest -q | tee pytest-output.txt
+      - name: Python dependency graph sanity
+        run: |
+          python -m pip check
+      - name: Python vulnerability audit
+        run: |
+          python -m pip install --no-input --upgrade pip-audit
+          pip-audit --desc --output python-vuln-report.txt
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Run extended Go checks
+        working-directory: daemon/go
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          if [ -n "$(gofmt -s -l *.go)" ]; then
+            echo "gofmt check failed for:"
+            gofmt -s -l *.go
+            exit 1
+          fi
+          go vet ./...
+          if ! staticcheck ./... > go-staticcheck-output.txt; then
+            cat go-staticcheck-output.txt
+            exit 1
+          fi
+          go test -race ./...
+          go test ./... > go-test-output.txt
+      - name: Go module integrity check
+        working-directory: daemon/go
+        run: go mod verify
+      - name: Go vulnerability audit
+        working-directory: daemon/go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go run golang.org/x/vuln/cmd/govulncheck ./... | tee go-vulncheck-output.txt
+      - name: Secret pattern scan
+        run: .github/scripts/ci-secret-scan.sh
+      - name: Archive nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nightly-ci-artifacts
+          path: |
+            daemon/go/go-test-output.txt
+            daemon/go/go-staticcheck-output.txt
+            daemon/go/go-vulncheck-output.txt
+            pytest-output.txt
+            python-vuln-report.txt
