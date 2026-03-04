@@ -29,36 +29,48 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    name: str           # "claude" — internal key
-    display_name: str   # "Claude Code" — shown in UI
-    key: str            # "c" — compact key in raw data JSON
-    color: str          # "#6366f1" — chart/legend color
-    collect_fn: str     # "collect_claude_data" — function name (string for mockability)
-    label: str          # "Claude Code (ccusage)" — status message during collection
+    name: str  # "claude" — internal key
+    display_name: str  # "Claude Code" — shown in UI
+    key: str  # "c" — compact key in raw data JSON
+    color: str  # "#6366f1" — chart/legend color
+    collect_fn: str  # "collect_claude_data" — function name (string for mockability)
+    label: str  # "Claude Code (ccusage)" — status message during collection
     rates: tuple[float, float, float]  # (input, output, cached) per-token USD rates
 
 
 PROVIDERS: tuple[ProviderConfig, ...] = (
-    ProviderConfig("claude", "Claude Code", "c", "#6366f1",
-                   "collect_claude_data", "Claude Code (ccusage)",
-                   (3e-6, 15e-6, 0.30e-6)),
-    ProviderConfig("codex", "Codex CLI", "x", "#22c55e",
-                   "collect_codex_data", "Codex CLI (@ccusage/codex)",
-                   (0.69e-6, 2.76e-6, 0.17e-6)),
-    ProviderConfig("gemini", "Gemini CLI", "g", "#f59e0b",
-                   "collect_gemini_data", "Gemini CLI (telemetry)",
-                   (1.25e-6, 10.0e-6, 0.125e-6)),
+    ProviderConfig(
+        "claude", "Claude Code", "c", "#6366f1", "collect_claude_data", "Claude Code (ccusage)", (3e-6, 15e-6, 0.30e-6)
+    ),
+    ProviderConfig(
+        "codex",
+        "Codex CLI",
+        "x",
+        "#22c55e",
+        "collect_codex_data",
+        "Codex CLI (@ccusage/codex)",
+        (0.69e-6, 2.76e-6, 0.17e-6),
+    ),
+    ProviderConfig(
+        "gemini",
+        "Gemini CLI",
+        "g",
+        "#f59e0b",
+        "collect_gemini_data",
+        "Gemini CLI (telemetry)",
+        (1.25e-6, 10.0e-6, 0.125e-6),
+    ),
 )
 
 # --- Energy / Carbon Model ---
 ENERGY_PER_OUTPUT_TOKEN_WH = 0.001
 ENERGY_PER_INPUT_TOKEN_WH = 0.0002
 ENERGY_PER_CACHED_TOKEN_WH = 0.00005
-PUE = 1.2                    # Power Usage Effectiveness (data center overhead)
+PUE = 1.2  # Power Usage Effectiveness (data center overhead)
 EMBODIED_CARBON_FACTOR = 1.2  # +20% for hardware manufacturing
-GRID_LOSS_FACTOR = 1.05       # 5% transmission losses (EIA)
-CARBON_INTENSITY = 390        # gCO2e per kWh (US average)
-WATER_USE_EFFICIENCY = 0.5    # liters per kWh
+GRID_LOSS_FACTOR = 1.05  # 5% transmission losses (EIA)
+CARBON_INTENSITY = 390  # gCO2e per kWh (US average)
+WATER_USE_EFFICIENCY = 0.5  # liters per kWh
 ELECTRICITY_COST_KWH = 0.13  # USD per kWh (EIA commercial average)
 PROVIDER_CACHE_SCHEMA_VERSION = 1
 PROVIDER_CACHE_FILENAME = "tokenprint-provider-cache-v1.json"
@@ -83,9 +95,7 @@ CLAUDE_RATE_BY_MODEL_PREFIX: tuple[tuple[str, tuple[float, float]], ...] = (
 def run_command(cmd: list[str], timeout: int = 60) -> str | None:
     """Run a command (list of args) and return stdout, or None on failure."""
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode == 0:
             return result.stdout.strip()
         return None
@@ -214,8 +224,11 @@ def collect_claude_data(since: str | None = None, until: str | None = None) -> d
         if date not in daily:
             daily[date] = {
                 "provider": "claude",
-                "input_tokens": 0, "output_tokens": 0,
-                "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost": 0,
             }
         daily[date]["input_tokens"] += entry.get("inputTokens", 0) or 0
         daily[date]["output_tokens"] += entry.get("outputTokens", 0) or 0
@@ -237,7 +250,7 @@ def _parse_date_flexible(date_str: str | None) -> str | None:
     if not date_str:
         return None
     # Try ISO format first (validate calendar correctness)
-    if len(date_str) >= 10 and date_str[4] == '-':
+    if len(date_str) >= 10 and date_str[4] == "-":
         candidate = date_str[:10]
         try:
             datetime.strptime(candidate, "%Y-%m-%d")
@@ -307,9 +320,9 @@ def collect_codex_data(since: str | None = None, until: str | None = None) -> di
         entries.append((date, input_tok, output_tok, cached_tok, cost))
 
     # Use gpt-5-codex pricing for all unpriced days (including gpt-5.3-codex)
-    rate_input = 0.69e-6    # $0.69/M input tokens
-    rate_output = 2.76e-6   # $2.76/M output tokens
-    rate_cached = 0.17e-6   # $0.17/M cached tokens
+    rate_input = 0.69e-6  # $0.69/M input tokens
+    rate_output = 2.76e-6  # $2.76/M output tokens
+    rate_cached = 0.17e-6  # $0.17/M cached tokens
 
     daily: dict[str, dict[str, Any]] = {}
     for date, input_tok, output_tok, cached_tok, cost in entries:
@@ -318,8 +331,11 @@ def collect_codex_data(since: str | None = None, until: str | None = None) -> di
         if date not in daily:
             daily[date] = {
                 "provider": "codex",
-                "input_tokens": 0, "output_tokens": 0,
-                "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost": 0,
             }
         daily[date]["input_tokens"] += input_tok
         daily[date]["output_tokens"] += output_tok
@@ -336,12 +352,16 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
         print("         Run: bash install.sh (or bash setup-gemini-telemetry.sh)", file=sys.stderr)
         return {}
 
-    daily: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        "provider": "gemini",
-        "input_tokens": 0, "output_tokens": 0,
-        "cache_read_tokens": 0, "cache_write_tokens": 0,
-        "cost": 0,
-    })
+    daily: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "provider": "gemini",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0,
+        }
+    )
 
     try:
         with open(log_path) as f:
@@ -389,7 +409,9 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
 
                 raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
                 output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))
-                cached_tok = _safe_int(attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0)))
+                cached_tok = _safe_int(
+                    attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0))
+                )
                 # Gemini input_token_count includes cached — subtract to get non-cached input
                 input_tok = max(0, raw_input - cached_tok)
 
@@ -607,8 +629,13 @@ def merge_data(
                 }
             else:
                 row[name] = {
-                    "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
-                    "cost": 0, "energy_wh": 0, "carbon_g": 0, "water_ml": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cost": 0,
+                    "energy_wh": 0,
+                    "carbon_g": 0,
+                    "water_ml": 0,
                 }
         merged.append(row)
     return merged
@@ -633,8 +660,7 @@ def compute_dashboard_data(
     # Provider data presence (for default toggle state)
     provider_has_data = {
         p.name: any(
-            r[p.name]["input_tokens"] + r[p.name]["output_tokens"] + r[p.name]["cache_read_tokens"] > 0
-            for r in data
+            r[p.name]["input_tokens"] + r[p.name]["output_tokens"] + r[p.name]["cache_read_tokens"] > 0 for r in data
         )
         for p in PROVIDERS
     }
@@ -649,8 +675,10 @@ def compute_dashboard_data(
         row: dict[str, Any] = {"d": r["date"]}
         for p in PROVIDERS:
             row[p.key] = [
-                r[p.name]["input_tokens"], r[p.name]["output_tokens"],
-                r[p.name]["cache_read_tokens"], round(r[p.name]["cost"], 4),
+                r[p.name]["input_tokens"],
+                r[p.name]["output_tokens"],
+                r[p.name]["cache_read_tokens"],
+                round(r[p.name]["cost"], 4),
             ]
         raw_data.append(row)
 
@@ -659,8 +687,13 @@ def compute_dashboard_data(
         "githubUser": github_username,
         "providerHasData": provider_has_data,
         "providers": [
-            {"name": p.name, "displayName": p.display_name, "key": p.key,
-             "color": p.color, "rates": {"input": p.rates[0], "output": p.rates[1], "cached": p.rates[2]}}
+            {
+                "name": p.name,
+                "displayName": p.display_name,
+                "key": p.key,
+                "color": p.color,
+                "rates": {"input": p.rates[0], "output": p.rates[1], "cached": p.rates[2]},
+            }
             for p in PROVIDERS
         ],
         "minDate": min_date,
@@ -733,7 +766,6 @@ def _collect_merged_usage_data(since: str | None, until: str | None, no_cache: b
     merged = merge_data(provider_data)
     print(f"\nMerged: {len(merged)} days of data", file=sys.stderr)
     return merged
-
 
 
 def main() -> None:
