@@ -9,17 +9,40 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
+
+const (
+	defaultHost             = "127.0.0.1"
+	defaultPort             = 8765
+	defaultOutputFilename   = "tokenprint.html"
+	defaultTokenprintBinary = "tokenprint"
+	defaultRefreshPath      = "/api/refresh"
+	defaultRefreshTimeout   = 10 * time.Minute
+	defaultReadHeaderTO     = 5 * time.Second
+	defaultShutdownTO       = 5 * time.Second
+	maxPort                 = 65535
+	generatedAtFormat       = "01/02/2006, 03:04 PM"
+	loopbackHostFallback    = defaultHost
+)
+
+var loopbackHosts = []string{
+	defaultHost,
+	"::1",
+	"localhost",
+	"::ffff:7f00:1",
+}
 
 // Config controls daemon behavior.
 type Config struct {
@@ -30,9 +53,11 @@ type Config struct {
 	NoCache        bool
 	Since          string
 	Until          string
+	CachePath      string
 	RefreshPath    string
 	RefreshTimeout time.Duration
 	RefreshToken   string
+	GeminiLogPath  string
 	NoOpen         bool
 }
 
@@ -49,57 +74,113 @@ type App struct {
 
 func defaultConfig() Config {
 	return Config{
-		Host:           "127.0.0.1",
-		Port:           8765,
-		OutputPath:     filepath.Join(os.TempDir(), "tokenprint.html"),
-		TokenprintBin:  "tokenprint",
-		RefreshPath:    "/api/refresh",
-		RefreshTimeout: 10 * time.Minute,
+		Host:           defaultHost,
+		Port:           defaultPort,
+		OutputPath:     filepath.Join(os.TempDir(), defaultOutputFilename),
+		TokenprintBin:  defaultTokenprintBinary,
+		RefreshPath:    defaultRefreshPath,
+		RefreshTimeout: defaultRefreshTimeout,
 	}
 }
 
 func normalizeConfig(cfg Config) Config {
+	cfg.Host = strings.TrimSpace(cfg.Host)
+	cfg.OutputPath = strings.TrimSpace(cfg.OutputPath)
+	cfg.TokenprintBin = strings.TrimSpace(cfg.TokenprintBin)
+	cfg.RefreshPath = strings.TrimSpace(cfg.RefreshPath)
+	cfg.Since = strings.TrimSpace(cfg.Since)
+	cfg.Until = strings.TrimSpace(cfg.Until)
+	cfg.CachePath = strings.TrimSpace(cfg.CachePath)
+	cfg.RefreshToken = strings.TrimSpace(cfg.RefreshToken)
+	cfg.GeminiLogPath = strings.TrimSpace(cfg.GeminiLogPath)
+
 	if cfg.Host == "" {
-		cfg.Host = "127.0.0.1"
+		cfg.Host = defaultHost
 	}
 	if cfg.Port <= 0 {
-		cfg.Port = 8765
+		cfg.Port = defaultPort
+	}
+	if cfg.Port > maxPort {
+		cfg.Port = defaultPort
 	}
 	if cfg.OutputPath == "" {
-		cfg.OutputPath = filepath.Join(os.TempDir(), "tokenprint.html")
+		cfg.OutputPath = filepath.Join(os.TempDir(), defaultOutputFilename)
 	}
 	if cfg.TokenprintBin == "" {
-		cfg.TokenprintBin = "tokenprint"
+		cfg.TokenprintBin = defaultTokenprintBinary
 	}
 	if cfg.RefreshPath == "" {
-		cfg.RefreshPath = "/api/refresh"
+		cfg.RefreshPath = defaultRefreshPath
 	}
 	if !strings.HasPrefix(cfg.RefreshPath, "/") {
 		cfg.RefreshPath = "/" + cfg.RefreshPath
 	}
 	if cfg.RefreshTimeout <= 0 {
-		cfg.RefreshTimeout = 10 * time.Minute
+		cfg.RefreshTimeout = defaultRefreshTimeout
 	}
 	return cfg
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	host = normalizedLoopbackHost(host)
+	for _, allowed := range loopbackHosts {
+		if host == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedLoopbackHost(host string) string {
+	host = strings.TrimSpace(host)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	}
+	return host
+}
+
+func formatListenAddress(host string, port int) string {
+	return net.JoinHostPort(normalizedLoopbackHost(host), strconv.Itoa(port))
+}
+
+func formatPublicURL(host string, port int) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "0.0.0.0" || host == "::" {
+		host = loopbackHostFallback
+	}
+	return "http://" + formatListenAddress(host, port)
+}
+
+func buildTokenprintArgs(cfg Config) []string {
+	args := []string{
+		"--no-open", "--output", cfg.OutputPath, "--live-mode", "--refresh-endpoint", cfg.RefreshPath,
+	}
+	if cfg.RefreshToken != "" {
+		args = append(args, "--refresh-token", cfg.RefreshToken)
+	}
+	if cfg.NoCache {
+		args = append(args, "--no-cache")
+	}
+	if cfg.Since != "" {
+		args = append(args, "--since", cfg.Since)
+	}
+	if cfg.Until != "" {
+		args = append(args, "--until", cfg.Until)
+	}
+	if cfg.CachePath != "" {
+		args = append(args, "--cache-path", cfg.CachePath)
+	}
+	if cfg.GeminiLogPath != "" {
+		args = append(args, "--gemini-log-path", cfg.GeminiLogPath)
+	}
+	return args
 }
 
 func buildRunner(cfg Config) func(context.Context) error {
 	cfg = normalizeConfig(cfg)
 	return func(ctx context.Context) error {
-		args := []string{"--no-open", "--output", cfg.OutputPath, "--live-mode", "--refresh-endpoint", cfg.RefreshPath}
-		if cfg.RefreshToken != "" {
-			args = append(args, "--refresh-token", cfg.RefreshToken)
-		}
-		if cfg.NoCache {
-			args = append(args, "--no-cache")
-		}
-		if cfg.Since != "" {
-			args = append(args, "--since", cfg.Since)
-		}
-		if cfg.Until != "" {
-			args = append(args, "--until", cfg.Until)
-		}
-
+		args := buildTokenprintArgs(cfg)
 		cmd := exec.CommandContext(ctx, cfg.TokenprintBin, args...)
 		cmd.Stdout = os.Stdout
 		var stderr bytes.Buffer
@@ -158,7 +239,7 @@ func (a *App) warmup(ctx context.Context) error {
 		a.refreshFinish(err, "")
 		return err
 	}
-	a.refreshFinish(nil, time.Now().Format("01/02/2006, 03:04 PM"))
+	a.refreshFinish(nil, time.Now().Format(generatedAtFormat))
 	return nil
 }
 
@@ -216,9 +297,9 @@ func (a *App) originAllowed(origin string) bool {
 	if origin == "" {
 		return true
 	}
-	allowed := []string{
-		fmt.Sprintf("http://127.0.0.1:%d", a.cfg.Port),
-		fmt.Sprintf("http://localhost:%d", a.cfg.Port),
+	allowed := make([]string, 0, len(loopbackHosts))
+	for _, host := range loopbackHosts {
+		allowed = append(allowed, "http://"+formatListenAddress(host, a.cfg.Port))
 	}
 	for _, o := range allowed {
 		if origin == o {
@@ -237,9 +318,10 @@ func (a *App) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "forbidden"})
 		return
 	}
-	if a.cfg.RefreshToken != "" {
-		tok := r.Header.Get("X-Tokenprint-Token")
-		if tok != a.cfg.RefreshToken {
+	requiresToken := a.cfg.RefreshToken != "" || !isLoopbackHost(a.cfg.Host)
+	if requiresToken {
+		tok := strings.TrimSpace(r.Header.Get("X-Tokenprint-Token"))
+		if tok == "" || tok != a.cfg.RefreshToken {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
 			return
 		}
@@ -264,7 +346,7 @@ func (a *App) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	generatedAt := time.Now().Format("01/02/2006, 03:04 PM")
+	generatedAt := time.Now().Format(generatedAtFormat)
 	a.refreshFinish(nil, generatedAt)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "generatedAt": generatedAt})
 }
@@ -302,14 +384,25 @@ func main() {
 	flag.BoolVar(&cfg.NoCache, "no-cache", false, "Pass --no-cache to tokenprint")
 	flag.StringVar(&cfg.Since, "since", "", "Optional since (YYYYMMDD)")
 	flag.StringVar(&cfg.Until, "until", "", "Optional until (YYYYMMDD)")
+	flag.StringVar(&cfg.CachePath, "cache-path", cfg.CachePath, "Path to tokenprint cache file or directory")
 	flag.StringVar(&cfg.RefreshPath, "refresh-path", cfg.RefreshPath, "Refresh API path")
 	flag.DurationVar(&cfg.RefreshTimeout, "timeout", cfg.RefreshTimeout, "Refresh timeout")
-	flag.StringVar(&cfg.RefreshToken, "refresh-token", "", "Optional shared token required for POST refresh")
+	flag.StringVar(
+		&cfg.RefreshToken,
+		"refresh-token",
+		"",
+		"Shared token required for POST refresh when bound to non-loopback hosts",
+	)
+	flag.StringVar(&cfg.GeminiLogPath, "gemini-log-path", cfg.GeminiLogPath, "Path to Gemini telemetry log or directory (passed to tokenprint)")
 	flag.BoolVar(&cfg.NoOpen, "no-open", false, "Do not auto-open browser")
 	flag.Parse()
 
 	cfg = normalizeConfig(cfg)
 	app := newApp(cfg, nil)
+
+	if !isLoopbackHost(cfg.Host) && cfg.RefreshToken == "" {
+		log.Fatal("refusing to run refresh endpoint without --refresh-token when host is non-loopback")
+	}
 
 	warmCtx, warmCancel := context.WithTimeout(context.Background(), cfg.RefreshTimeout)
 	defer warmCancel()
@@ -317,24 +410,20 @@ func main() {
 		log.Fatalf("initial tokenprint run failed: %v", err)
 	}
 
-	openHost := cfg.Host
-	if openHost == "0.0.0.0" {
-		openHost = "127.0.0.1"
-	}
-	url := fmt.Sprintf("http://%s:%d", openHost, cfg.Port)
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	url := formatPublicURL(cfg.Host, cfg.Port)
+	addr := formatListenAddress(cfg.Host, cfg.Port)
 
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           app.handler(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: defaultReadHeaderTO,
 	}
 
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stopCh
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), defaultShutdownTO)
 		defer cancel()
 		_ = httpServer.Shutdown(ctx)
 	}()
