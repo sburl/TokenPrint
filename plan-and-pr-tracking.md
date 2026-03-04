@@ -28,8 +28,8 @@ Current intended merge order: 8 -> 9 -> 10 -> 11.
 
 ## Step 0 — Baseline
 - Repository on latest remote main: ✅ `Already up to date`.
-- Existing open PRs: none observed (`gh pr list --limit 10` returned no rows).
-- Existing CI: none (no `.github` dir).
+- Existing open PRs: 8→11 (`gh pr list --state open`).
+- Existing CI: ✅ `.github/workflows/ci.yml` and helper scripts are present.
 
 ## PR Tracker (intended order)
 
@@ -234,4 +234,4 @@ For each numbered stage below, we complete:
 
 ## Current stage status
 - **Current:** Split PR queue now active
-- **Next PR:** #11 (until completed and merged)
+- **Next PR:** #8, then #9, then #10, then #11
