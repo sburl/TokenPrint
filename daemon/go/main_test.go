@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -285,6 +286,51 @@ func TestRefreshHandlerSuccessAndStatus(t *testing.T) {
 	}
 	if _, ok := payload["generatedAt"].(string); !ok {
 		t.Fatalf("expected generatedAt in payload, got %+v", payload)
+	}
+}
+
+func TestRefreshHandlerErrorPublishesStatusAndPreservesGeneratedAt(t *testing.T) {
+	attempts := 0
+	app := newApp(Config{}, func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return nil
+		}
+		return errors.New("collector failed")
+	})
+	handler := app.handler()
+
+	firstStatus, firstBody, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", "")
+	if firstStatus != http.StatusOK {
+		t.Fatalf("expected first refresh to succeed, got %d body=%s", firstStatus, firstBody)
+	}
+	var firstPayload map[string]any
+	if err := json.Unmarshal([]byte(firstBody), &firstPayload); err != nil {
+		t.Fatalf("decode first refresh payload: %v", err)
+	}
+	firstGeneratedAt, ok := firstPayload["generatedAt"].(string)
+	if !ok || firstGeneratedAt == "" {
+		t.Fatalf("expected generatedAt in first refresh payload, got %+v", firstPayload)
+	}
+
+	errorStatus, errorBody, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", "")
+	if errorStatus != http.StatusInternalServerError {
+		t.Fatalf("expected second refresh to fail with 500, got %d body=%s", errorStatus, errorBody)
+	}
+
+	statusCode, statusBody, _ := performRequest(t, handler, http.MethodGet, "/api/status", "")
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", statusCode, statusBody)
+	}
+	var statusPayload map[string]any
+	if err := json.Unmarshal([]byte(statusBody), &statusPayload); err != nil {
+		t.Fatalf("decode status payload: %v", err)
+	}
+	if statusPayload["lastError"] != "collector failed" {
+		t.Fatalf("expected lastError in status, got %+v", statusPayload["lastError"])
+	}
+	if got, ok := statusPayload["generatedAt"].(string); !ok || got != firstGeneratedAt {
+		t.Fatalf("expected generatedAt to remain %q after failed refresh, got %+v", firstGeneratedAt, statusPayload["generatedAt"])
 	}
 }
 
