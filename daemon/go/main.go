@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -225,7 +226,10 @@ func (a *App) requestHasValidToken(r *http.Request) bool {
 		return true
 	}
 	tok := strings.TrimSpace(r.Header.Get("X-Tokenprint-Token"))
-	return tok != "" && tok == a.cfg.RefreshToken
+	if tok == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(tok), []byte(a.cfg.RefreshToken)) == 1
 }
 
 func (a *App) refreshFinish(err error, generatedAt string) {

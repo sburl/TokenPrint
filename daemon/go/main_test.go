@@ -410,6 +410,10 @@ func TestRefreshHandlerRequiresToken(t *testing.T) {
 	if unauthStatus != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without token, got %d body=%s", unauthStatus, unauthBody)
 	}
+	invalidStatus, invalidBody, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", "wrong")
+	if invalidStatus != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with incorrect token, got %d body=%s", invalidStatus, invalidBody)
+	}
 
 	authStatus, authBody, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", "secret")
 	if authStatus != http.StatusOK {
