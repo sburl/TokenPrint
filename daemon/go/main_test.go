@@ -342,6 +342,10 @@ func TestStatusHandlerRequiresTokenForPublicHost(t *testing.T) {
 	if publicStatus != http.StatusUnauthorized {
 		t.Fatalf("expected public host status to require token, got %d body=%s", publicStatus, publicBody)
 	}
+	whitespaceTokenStatus, _, _ := performRequest(t, handler, http.MethodGet, "/api/status", "   ")
+	if whitespaceTokenStatus != http.StatusUnauthorized {
+		t.Fatalf("expected whitespace token to be rejected, got %d", whitespaceTokenStatus)
+	}
 
 	app = newApp(Config{Host: "0.0.0.0", RefreshToken: "secret"}, func(context.Context) error { return nil })
 	handler = app.handler()
