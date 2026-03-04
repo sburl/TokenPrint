@@ -33,6 +33,31 @@ func TestNormalizeConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigTrimsInputs(t *testing.T) {
+	cfg := normalizeConfig(Config{Host: " 127.0.0.1 ", RefreshToken: " secret "})
+	if cfg.Host != "127.0.0.1" {
+		t.Fatalf("expected trimmed host, got %q", cfg.Host)
+	}
+	if cfg.RefreshToken != "secret" {
+		t.Fatalf("expected trimmed token, got %q", cfg.RefreshToken)
+	}
+}
+
+func TestValidateSecurityConfig(t *testing.T) {
+	if err := validateSecurityConfig(Config{Host: "127.0.0.1"}); err != nil {
+		t.Fatalf("loopback host should pass without token: %v", err)
+	}
+	if err := validateSecurityConfig(Config{Host: "localhost"}); err != nil {
+		t.Fatalf("localhost should pass without token: %v", err)
+	}
+	if err := validateSecurityConfig(Config{Host: "0.0.0.0"}); err == nil {
+		t.Fatal("non-loopback host should require token")
+	}
+	if err := validateSecurityConfig(Config{Host: "0.0.0.0", RefreshToken: "x"}); err != nil {
+		t.Fatalf("non-loopback host with token should pass: %v", err)
+	}
+}
+
 func TestIndexHandlerServesHTML(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "tokenprint.html")
 	if err := os.WriteFile(outputPath, []byte("<html>ok</html>"), 0o644); err != nil {
@@ -151,6 +176,15 @@ func TestRefreshHandlerRequiresToken(t *testing.T) {
 	authStatus, authBody, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", "secret")
 	if authStatus != http.StatusOK {
 		t.Fatalf("expected 200 with token, got %d body=%s", authStatus, authBody)
+	}
+}
+
+func TestRefreshHandlerTrimsTokenWhitespace(t *testing.T) {
+	app := newApp(Config{RefreshToken: "secret "}, func(context.Context) error { return nil })
+	handler := app.handler()
+	status, body, _ := performRequest(t, handler, http.MethodPost, "/api/refresh", " secret")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200 with whitespace-trimmed token, got %d body=%s", status, body)
 	}
 }
 

@@ -432,7 +432,7 @@ stackedChartOpts.scales.x.stacked = true;
 stackedChartOpts.scales.y.stacked = true;
 
 // === 4. Formatting & Calculation Functions ===
-// Each raw data row has: [inputTokens, outputTokens, cachedTokens, cost]
+// Each raw data row has: [inputTokens, outputTokens, cachedReadTokens, cost, cachedWriteTokens]
 function calcEnergy(input, output, cached) {
   return (output * ENERGY.OUTPUT + input * ENERGY.INPUT + cached * ENERGY.CACHE) * ENERGY.PUE * ENERGY.GRID;
 }
@@ -471,16 +471,22 @@ function getActiveProviders() {
 
 // === 6. Dashboard Section: Compute Totals ===
 function computeTotals(filtered, activeSet) {
-  const totals = {cost: 0, input: 0, output: 0, cached: 0, energy: 0, carbon: 0, water: 0};
+  const totals = {cost: 0, input: 0, output: 0, cached: 0, cachedRead: 0, cachedWrite: 0, energy: 0, carbon: 0, water: 0};
   const providerTotals = Object.fromEntries(
     PROVIDERS.map(p => [p, {cost: 0, energy: 0, carbon: 0}])
   );
   filtered.forEach(row => {
     PROVIDER_KEYS.forEach((key, idx) => {
       if (!activeSet.has(PROVIDERS[idx])) return;
-      const [input, output, cached, cost] = row[key];
+      const input = row[key][0] || 0;
+      const output = row[key][1] || 0;
+      const cachedRead = row[key][2] || 0;
+      const cost = row[key][3] || 0;
+      const cachedWrite = row[key][4] || 0;
+      const cached = cachedRead + cachedWrite;
       const energy = calcEnergy(input, output, cached);
       totals.cost += cost; totals.input += input; totals.output += output; totals.cached += cached;
+      totals.cachedRead += cachedRead; totals.cachedWrite += cachedWrite;
       totals.energy += energy; totals.carbon += calcCarbon(energy); totals.water += calcWater(energy);
       const prov = PROVIDERS[idx];
       providerTotals[prov].cost += cost;
@@ -494,12 +500,15 @@ function computeTotals(filtered, activeSet) {
 // === 7. Dashboard Section: Update Header ===
 function updateHeader(dateLabels, totals, totalTokens) {
   const n = dateLabels.length;
+  const cachedPart = totals.cachedWrite > 0
+    ? totals.cached.toLocaleString('en-US') + ' cached (' + totals.cachedRead.toLocaleString('en-US') + ' read, ' + totals.cachedWrite.toLocaleString('en-US') + ' write)'
+    : totals.cached.toLocaleString('en-US') + ' cached';
   setText('dateRange', dateLabels[0] + ' to ' + dateLabels[n - 1] + ' (' + n + ' active days)');
   setText('tokenSummary',
     totalTokens.toLocaleString('en-US') + ' total tokens \u00b7 '
     + totals.input.toLocaleString('en-US') + ' input \u00b7 '
     + totals.output.toLocaleString('en-US') + ' output \u00b7 '
-    + totals.cached.toLocaleString('en-US') + ' cached');
+    + cachedPart);
 }
 
 // === 8. Dashboard Section: Update Cards ===
@@ -523,7 +532,7 @@ function updateCards(filtered, totals, providerTotals, activeProviders, activeSe
   filtered.forEach(row => {
     let dayTotal = 0;
     PROVIDER_KEYS.forEach((key, idx) => {
-      if (activeSet.has(PROVIDERS[idx])) dayTotal += row[key][0] + row[key][1] + row[key][2];
+      if (activeSet.has(PROVIDERS[idx])) dayTotal += row[key][0] + row[key][1] + row[key][2] + (row[key][4] || 0);
     });
     if (dayTotal > busiestVal) { busiestVal = dayTotal; busiestDate = row.d; }
   });
@@ -536,13 +545,13 @@ function updateCards(filtered, totals, providerTotals, activeProviders, activeSe
   setText('cardTokensDetail', fmtTokens(totalTokens / dayCount) + '/day avg \u00b7 busiest: ' + fmtTokens(busiestVal) + ' (' + busiestLabel + ')');
 
   // Input card: cache hit rate + savings
-  const allInput = totals.input + totals.cached;
-  const cacheRate = allInput > 0 ? (totals.cached / allInput * 100).toFixed(0) : 0;
+  const allInput = totals.input + totals.cachedRead;
+  const cacheRate = allInput > 0 ? (totals.cachedRead / allInput * 100).toFixed(0) : 0;
   let cacheSavings = 0;
   filtered.forEach(row => {
     PROVIDER_KEYS.forEach((key, idx) => {
       if (!activeSet.has(PROVIDERS[idx])) return;
-      const cached = row[key][2];
+      const cached = row[key][2] || 0;
       const rates = PROVIDER_RATES[key];
       cacheSavings += cached * (rates[0] - rates[2]);
     });
@@ -556,7 +565,9 @@ function updateCards(filtered, totals, providerTotals, activeProviders, activeSe
     PROVIDER_KEYS.forEach((key, idx) => {
       if (!activeSet.has(PROVIDERS[idx])) return;
       const rates = PROVIDER_RATES[key];
-      const [input, output, cached] = row[key];
+      const input = row[key][0] || 0;
+      const output = row[key][1] || 0;
+      const cached = row[key][2] || 0;
       estOutputCost += output * rates[1];
       estTotalCost += input * rates[0] + output * rates[1] + cached * rates[2];
     });
@@ -619,13 +630,14 @@ function updateMatrix(filtered, activeSet) {
     const month = row.d.slice(0, 7);
     if (!monthlyCost[month]) {
       monthlyCost[month] = [0, 0, 0];
-      monthlyTokens[month] = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
+      monthlyTokens[month] = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cachedRead: 0, cachedWrite: 0}));
     }
     activeIndices.forEach(i => {
       monthlyCost[month][i] += row[PROVIDER_KEYS[i]][3];
       monthlyTokens[month][i].input += row[PROVIDER_KEYS[i]][0];
       monthlyTokens[month][i].output += row[PROVIDER_KEYS[i]][1];
-      monthlyTokens[month][i].cached += row[PROVIDER_KEYS[i]][2];
+      monthlyTokens[month][i].cachedRead += row[PROVIDER_KEYS[i]][2] || 0;
+      monthlyTokens[month][i].cachedWrite += row[PROVIDER_KEYS[i]][4] || 0;
     });
   });
 
@@ -638,7 +650,7 @@ function updateMatrix(filtered, activeSet) {
       const key = String(year) + '-' + String(month).padStart(2, '0');
       if (!monthlyCost[key]) {
         monthlyCost[key] = [0, 0, 0];
-        monthlyTokens[key] = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
+        monthlyTokens[key] = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cachedRead: 0, cachedWrite: 0}));
       }
       month++;
       if (month > 12) { month = 1; year++; }
@@ -647,7 +659,7 @@ function updateMatrix(filtered, activeSet) {
 
   const sortedMonths = Object.keys(monthlyCost).sort();
   const columnTotals = [0, 0, 0];
-  const columnTokenTotals = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cached: 0}));
+  const columnTokenTotals = PROVIDER_KEYS.map(() => ({input: 0, output: 0, cachedRead: 0, cachedWrite: 0}));
 
   // Rebuild header with only active providers (DOM construction — no innerHTML)
   const matrixHead = document.getElementById('matrixHead');
@@ -673,7 +685,7 @@ function updateMatrix(filtered, activeSet) {
     td.textContent = '$' + fmtFixed(cost, 2);
     const tip = document.createElement('div');
     tip.className = 'tip';
-    [['Input', tokens.input], ['Output', tokens.output], ['Cached', tokens.cached]].forEach(([label, val]) => {
+    [['Input', tokens.input], ['Output', tokens.output], ['Cached Read', tokens.cachedRead], ['Cached Write', tokens.cachedWrite]].forEach(([label, val]) => {
       const row = document.createElement('div');
       row.className = 'tip-row';
       const lbl = document.createElement('span');
@@ -702,7 +714,8 @@ function updateMatrix(filtered, activeSet) {
       columnTotals[i] += costs[i];
       columnTokenTotals[i].input += tokens[i].input;
       columnTokenTotals[i].output += tokens[i].output;
-      columnTokenTotals[i].cached += tokens[i].cached;
+      columnTokenTotals[i].cachedRead += tokens[i].cachedRead;
+      columnTokenTotals[i].cachedWrite += tokens[i].cachedWrite;
     });
     const tr = document.createElement('tr');
     const labelTd = document.createElement('td');
@@ -745,7 +758,10 @@ function updateCharts(filtered, dateLabels, activeProviders, activeSet) {
     let dayCarbonTotal = 0;
     PROVIDER_KEYS.forEach((key, idx) => {
       if (!activeSet.has(PROVIDERS[idx])) return;
-      const [input, output, cached, cost] = row[key];
+      const input = row[key][0] || 0;
+      const output = row[key][1] || 0;
+      const cached = (row[key][2] || 0) + (row[key][4] || 0);
+      const cost = row[key][3] || 0;
       const energy = calcEnergy(input, output, cached);
       const carbon = calcCarbon(energy);
       providerDaily[PROVIDERS[idx]].cost.push(Math.round(cost * 100) / 100);

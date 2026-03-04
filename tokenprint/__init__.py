@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -21,8 +22,9 @@ import sys
 import tempfile
 import webbrowser
 from collections import defaultdict
+from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -375,13 +377,9 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
                     continue
 
                 # Extract timestamp for date grouping
-                ts = record.get("timestamp") or record.get("time") or record.get("Timestamp") or ""
-                if not ts:
-                    continue
-                try:
-                    date = ts[:10]  # YYYY-MM-DD
-                    datetime.strptime(date, "%Y-%m-%d")
-                except (ValueError, IndexError):
+                ts = record.get("timestamp") or record.get("time") or record.get("Timestamp")
+                date = _date_from_timestamp_like(ts)
+                if not date:
                     continue
 
                 # Apply date filters
@@ -415,7 +413,7 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
                 # Gemini input_token_count includes cached — subtract to get non-cached input
                 input_tok = max(0, raw_input - cached_tok)
 
-                if input_tok or output_tok:
+                if input_tok or output_tok or cached_tok:
                     daily[date]["input_tokens"] += input_tok
                     daily[date]["output_tokens"] += output_tok
                     daily[date]["cache_read_tokens"] += cached_tok
@@ -438,11 +436,72 @@ def _safe_int(val: Any) -> int:
     try:
         return int(val)
     except (TypeError, ValueError):
-        return 0
+        try:
+            return int(float(val))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+
+def _date_from_epoch(value: float) -> str | None:
+    """Convert epoch seconds/ms/us/ns to YYYY-MM-DD in UTC."""
+    if not math.isfinite(value):
+        return None
+    abs_value = abs(value)
+    seconds = value
+    if abs_value >= 1e17:
+        seconds = value / 1_000_000_000
+    elif abs_value >= 1e14:
+        seconds = value / 1_000_000
+    elif abs_value >= 1e11:
+        seconds = value / 1_000
+    try:
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _date_from_timestamp_like(raw: Any) -> str | None:
+    """Parse mixed timestamp formats to YYYY-MM-DD (UTC if epoch)."""
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return _date_from_epoch(float(raw))
+    if not isinstance(raw, str):
+        return None
+
+    ts = raw.strip()
+    if not ts:
+        return None
+
+    if re.fullmatch(r"-?\d+(\.\d+)?", ts):
+        try:
+            numeric = float(ts)
+        except ValueError:
+            numeric = math.nan
+        parsed = _date_from_epoch(numeric)
+        if parsed:
+            return parsed
+
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        pass
+
+    if len(ts) >= 10:
+        candidate = ts[:10]
+        try:
+            datetime.strptime(candidate, "%Y-%m-%d")
+            return candidate
+        except ValueError:
+            pass
+    return None
 
 
 def _provider_cache_path() -> Path:
     """Return the provider cache location."""
+    env_path = os.getenv("TOKENPRINT_CACHE_PATH")
+    if env_path:
+        return Path(env_path).expanduser()
     return Path(tempfile.gettempdir()) / PROVIDER_CACHE_FILENAME
 
 
@@ -617,11 +676,14 @@ def merge_data(
             pdata = provider_data.get(name, {})
             if date in pdata:
                 d = pdata[date]
-                energy = calculate_energy(d["input_tokens"], d["output_tokens"], d["cache_read_tokens"])
+                cache_read = d["cache_read_tokens"]
+                cache_write = d.get("cache_write_tokens", 0)
+                energy = calculate_energy(d["input_tokens"], d["output_tokens"], cache_read + cache_write)
                 row[name] = {
                     "input_tokens": d["input_tokens"],
                     "output_tokens": d["output_tokens"],
-                    "cache_read_tokens": d["cache_read_tokens"],
+                    "cache_read_tokens": cache_read,
+                    "cache_write_tokens": cache_write,
                     "cost": round(d["cost"], 4),
                     "energy_wh": round(energy, 4),
                     "carbon_g": round(calculate_carbon(energy), 4),
@@ -632,6 +694,7 @@ def merge_data(
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
                     "cost": 0,
                     "energy_wh": 0,
                     "carbon_g": 0,
@@ -660,7 +723,12 @@ def compute_dashboard_data(
     # Provider data presence (for default toggle state)
     provider_has_data = {
         p.name: any(
-            r[p.name]["input_tokens"] + r[p.name]["output_tokens"] + r[p.name]["cache_read_tokens"] > 0 for r in data
+            r[p.name]["input_tokens"]
+            + r[p.name]["output_tokens"]
+            + r[p.name]["cache_read_tokens"]
+            + r[p.name]["cache_write_tokens"]
+            > 0
+            for r in data
         )
         for p in PROVIDERS
     }
@@ -679,6 +747,7 @@ def compute_dashboard_data(
                 r[p.name]["output_tokens"],
                 r[p.name]["cache_read_tokens"],
                 round(r[p.name]["cost"], 4),
+                r[p.name]["cache_write_tokens"],
             ]
         raw_data.append(row)
 
@@ -731,9 +800,7 @@ def generate_html(data: list[dict[str, Any]], output_path: str) -> None:
     """Generate the self-contained HTML dashboard from template."""
     config = compute_dashboard_data(data)
     html = _render_html_from_config(config)
-
-    with open(output_path, "w") as f:
-        f.write(html)
+    _write_html_file(output_path, html)
 
 
 def _default_output_path() -> str:
@@ -743,8 +810,23 @@ def _default_output_path() -> str:
 
 def _write_html_file(output_path: str, html: str) -> None:
     """Write rendered HTML to output path."""
-    with open(output_path, "w") as f:
-        f.write(html)
+    target = Path(output_path).expanduser()
+    if target.exists() and target.is_dir():
+        raise IsADirectoryError(f"Output path is a directory: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_file: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", delete=False, dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"
+        ) as f:
+            f.write(html)
+            tmp_file = Path(f.name)
+        os.replace(tmp_file, target)
+    finally:
+        if tmp_file and tmp_file.exists():
+            with suppress(OSError):
+                tmp_file.unlink()
 
 
 def _collect_merged_usage_data(since: str | None, until: str | None, no_cache: bool) -> list[dict[str, Any]]:

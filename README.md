@@ -69,10 +69,11 @@ For a persistent live dashboard where the **Refresh Data** button reruns collect
 ```bash
 tokenprintd                          # http://127.0.0.1:8765
 tokenprintd --port 8877              # custom port
-tokenprintd --refresh-token mysecret # optional auth token
+tokenprintd --refresh-token mysecret # refresh auth token
 ```
 
 `install.sh` builds and installs `tokenprintd` to `~/.local/bin`. The daemon runs `tokenprint` on startup, serves the dashboard, and handles refresh requests. See [`daemon/go/README.md`](daemon/go/README.md) for all flags.
+When binding `tokenprintd` to non-loopback interfaces (for example `--host 0.0.0.0`), `--refresh-token` is required.
 
 ## Data Sources
 

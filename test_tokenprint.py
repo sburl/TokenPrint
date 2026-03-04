@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -19,12 +20,15 @@ from tokenprint import (
     PUE,
     WATER_USE_EFFICIENCY,
     _collect_provider_data_incremental,
+    _date_from_timestamp_like,
     _json_dumps_html_safe,
     _load_provider_cache,
     _next_day_compact,
     _parse_date_flexible,
+    _provider_cache_path,
     _safe_int,
     _save_provider_cache,
+    _write_html_file,
     calculate_carbon,
     calculate_energy,
     calculate_water,
@@ -70,6 +74,9 @@ class TestSafeInt:
     def test_float(self):
         assert _safe_int(3.9) == 3
 
+    def test_scientific_notation_string(self):
+        assert _safe_int("1e3") == 1000
+
 
 # --- _parse_date_flexible ---
 
@@ -103,6 +110,20 @@ class TestParseDateFlexible:
         assert _parse_date_flexible("2026-02-30") is None
 
 
+class TestDateFromTimestampLike:
+    def test_iso_timestamp(self):
+        assert _date_from_timestamp_like("2026-01-15T10:00:00Z") == "2026-01-15"
+
+    def test_epoch_seconds_string(self):
+        assert _date_from_timestamp_like("1736942400") == "2025-01-15"
+
+    def test_epoch_millis(self):
+        assert _date_from_timestamp_like(1736942400000) == "2025-01-15"
+
+    def test_invalid_timestamp(self):
+        assert _date_from_timestamp_like("not-a-time") is None
+
+
 # --- incremental cache helpers ---
 
 
@@ -133,6 +154,13 @@ class TestProviderCacheHelpers:
         assert loaded["claude"]["2026-02-19"]["input_tokens"] == 100
         assert loaded["claude"]["2026-02-19"]["provider"] == "claude"
         assert loaded["codex"] == {}
+
+    def test_provider_cache_path_env_override(self, monkeypatch):
+        custom = "~/tp-cache/custom-cache.json"
+        monkeypatch.setenv("TOKENPRINT_CACHE_PATH", custom)
+        path = _provider_cache_path()
+        assert str(path).endswith("tp-cache/custom-cache.json")
+        assert str(path).startswith(str(Path.home()))
 
 
 # --- _json_dumps_html_safe ---
@@ -361,6 +389,22 @@ class TestMergeData:
         assert row["carbon_g"] == pytest.approx(round(calculate_carbon(expected_energy), 4))
         assert row["water_ml"] == pytest.approx(round(calculate_water(expected_energy), 4))
 
+    def test_cache_write_tokens_included_in_energy(self):
+        claude = {
+            "2026-01-15": {
+                "provider": "claude",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+                "cache_read_tokens": 200,
+                "cache_write_tokens": 300,
+                "cost": 0.10,
+            }
+        }
+        result = merge_data({"claude": claude, "codex": {}, "gemini": {}})
+        row = result[0]["claude"]
+        expected_energy = calculate_energy(1000, 500, 500)
+        assert row["energy_wh"] == pytest.approx(round(expected_energy, 4))
+
 
 # --- compute_dashboard_data ---
 
@@ -449,7 +493,7 @@ class TestComputeDashboardData:
         # Verify keys come from registry
         for p in PROVIDERS:
             assert p.key in raw[0]
-        assert len(raw[0][PROVIDERS[0].key]) == 4  # [input, output, cached, cost]
+        assert len(raw[0][PROVIDERS[0].key]) == 5  # [input, output, cached_read, cost, cached_write]
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_empty_data(self, mock_user):
@@ -466,7 +510,7 @@ class TestComputeDashboardData:
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_raw_data_field_ordering(self, mock_user):
-        """Verify raw data arrays are [input, output, cached, cost] in correct order."""
+        """Verify raw data arrays are [input, output, cached_read, cost, cached_write]."""
         data = merge_data(
             {
                 "claude": {
@@ -475,7 +519,7 @@ class TestComputeDashboardData:
                         "input_tokens": 100,
                         "output_tokens": 200,
                         "cache_read_tokens": 300,
-                        "cache_write_tokens": 0,
+                        "cache_write_tokens": 400,
                         "cost": 0.50,
                     }
                 },
@@ -487,8 +531,30 @@ class TestComputeDashboardData:
         c = config["rawData"][0]["c"]
         assert c[0] == 100  # input
         assert c[1] == 200  # output
-        assert c[2] == 300  # cached
+        assert c[2] == 300  # cached read
         assert c[3] == 0.50  # cost
+        assert c[4] == 400  # cached write
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_provider_has_data_when_only_cache_write_tokens(self, mock_user):
+        data = merge_data(
+            {
+                "claude": {
+                    "2026-01-15": {
+                        "provider": "claude",
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cache_read_tokens": 0,
+                        "cache_write_tokens": 200,
+                        "cost": 0.01,
+                    }
+                },
+                "codex": {},
+                "gemini": {},
+            }
+        )
+        config = compute_dashboard_data(data)
+        assert config["providerHasData"]["claude"] is True
 
 
 # --- collect_claude_data ---
@@ -735,6 +801,50 @@ class TestCollectGeminiData:
         assert "2026-01-15" in result
         assert result["2026-01-15"]["input_tokens"] == 500
 
+    @patch("tokenprint.Path")
+    @patch("builtins.open")
+    def test_cached_only_day_is_retained(self, mock_file, mock_path):
+        mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
+        mock_path.__truediv__ = lambda s, x: mock_path
+        mock_path.exists.return_value = True
+
+        log_line = json.dumps(
+            {
+                "timestamp": "2026-01-15T10:00:00Z",
+                "attributes": {
+                    "input_token_count": 300,
+                    "output_token_count": 0,
+                    "cached_content_token_count": 300,
+                },
+            }
+        )
+        mock_file.return_value.__enter__ = lambda s: iter([log_line + "\n"])
+        mock_file.return_value.__exit__ = lambda s, *a: None
+
+        result = collect_gemini_data()
+        assert result["2026-01-15"]["input_tokens"] == 0
+        assert result["2026-01-15"]["cache_read_tokens"] == 300
+
+    @patch("tokenprint.Path")
+    @patch("builtins.open")
+    def test_numeric_epoch_timestamp_supported(self, mock_file, mock_path):
+        mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
+        mock_path.__truediv__ = lambda s, x: mock_path
+        mock_path.exists.return_value = True
+
+        # 2025-01-15T00:00:00Z in epoch seconds
+        log_line = json.dumps(
+            {
+                "timestamp": 1736899200,
+                "attributes": {"input_token_count": 100, "output_token_count": 50, "cached_content_token_count": 10},
+            }
+        )
+        mock_file.return_value.__enter__ = lambda s: iter([log_line + "\n"])
+        mock_file.return_value.__exit__ = lambda s, *a: None
+
+        result = collect_gemini_data()
+        assert "2025-01-15" in result
+
 
 # --- _collect_provider_data_incremental ---
 
@@ -893,6 +1003,23 @@ class TestGenerateHtml:
                     generate_html(data, os.path.join(tmpdir, "output.html"))
             finally:
                 tp.__file__ = original_file
+
+
+# --- _write_html_file ---
+
+
+class TestWriteHtmlFile:
+    def test_atomic_overwrite(self, tmp_path):
+        output = tmp_path / "tokenprint.html"
+        output.write_text("old")
+        _write_html_file(str(output), "new")
+        assert output.read_text() == "new"
+        leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".tokenprint.html.")]
+        assert leftovers == []
+
+    def test_directory_path_rejected(self, tmp_path):
+        with pytest.raises(IsADirectoryError):
+            _write_html_file(str(tmp_path), "<html>bad</html>")
 
 
 # --- main() ---
