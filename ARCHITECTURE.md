@@ -18,9 +18,8 @@ Python CLI, local cache, and optional Go daemon.
 2. **Persistence phase (Python)**
    - Cache file is `tokenprint-provider-cache-v1.json` by default or
      `TOKENPRINT_CACHE_PATH`.
-   - Cache schema version is normalized with migration hooks via
-     `_extract_provider_payload`, `_coerce_cache_schema_version`,
-     and `_migrate_provider_payload`.
+   - Cache schema is versioned (`PROVIDER_CACHE_SCHEMA_VERSION`) and provider
+     rows are normalized on load via `_normalize_provider_day`.
 3. **Merge phase (Python)**
    - `_collect_merged_usage_data` builds provider payloads and calls `merge_data`.
    - `merge_data` emits one row per date with provider-level tokens, costs, energy,

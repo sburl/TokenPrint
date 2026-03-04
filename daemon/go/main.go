@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -59,6 +60,8 @@ func defaultConfig() Config {
 }
 
 func normalizeConfig(cfg Config) Config {
+	cfg.Host = strings.TrimSpace(cfg.Host)
+	cfg.RefreshToken = strings.TrimSpace(cfg.RefreshToken)
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
 	}
@@ -81,6 +84,35 @@ func normalizeConfig(cfg Config) Config {
 		cfg.RefreshTimeout = 10 * time.Minute
 	}
 	return cfg
+}
+
+func isLoopbackHost(host string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	switch normalized {
+	case "", "127.0.0.1", "localhost", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateSecurityConfig(cfg Config) error {
+	if isLoopbackHost(cfg.Host) {
+		return nil
+	}
+	if strings.TrimSpace(cfg.RefreshToken) == "" {
+		return fmt.Errorf("non-loopback host %q requires --refresh-token", cfg.Host)
+	}
+	return nil
+}
+
+func secureTokenEqual(got string, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	got = strings.TrimSpace(got)
+	if expected == "" {
+		return got == ""
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(expected)) == 1
 }
 
 func buildRunner(cfg Config) func(context.Context) error {
@@ -239,7 +271,7 @@ func (a *App) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.cfg.RefreshToken != "" {
 		tok := r.Header.Get("X-Tokenprint-Token")
-		if tok != a.cfg.RefreshToken {
+		if !secureTokenEqual(tok, a.cfg.RefreshToken) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
 			return
 		}
@@ -309,6 +341,9 @@ func main() {
 	flag.Parse()
 
 	cfg = normalizeConfig(cfg)
+	if err := validateSecurityConfig(cfg); err != nil {
+		log.Fatal(err)
+	}
 	app := newApp(cfg, nil)
 
 	warmCtx, warmCancel := context.WithTimeout(context.Background(), cfg.RefreshTimeout)

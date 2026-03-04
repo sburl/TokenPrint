@@ -34,7 +34,7 @@ go run ./daemon/go --port 8765
 - `--no-cache` force full recollection
 - `--refresh-path` custom refresh endpoint path (default `/api/refresh`)
 - `--timeout` refresh timeout (default `10m`)
-- `--refresh-token` optional shared token for refresh auth (`X-Tokenprint-Token`)
+- `--refresh-token` shared token for refresh auth (`X-Tokenprint-Token`)
 - `--no-open` do not auto-open browser
 
 ## Example with refresh token
@@ -44,6 +44,8 @@ go run ./daemon/go --refresh-token local-dev-secret
 curl -X POST http://127.0.0.1:8765/api/refresh \
   -H 'X-Tokenprint-Token: local-dev-secret'
 ```
+
+If you bind to a non-loopback host (for example `--host 0.0.0.0`), `--refresh-token` is required.
 
 ## Test
 
