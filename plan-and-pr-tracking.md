@@ -1,7 +1,7 @@
 # TokenPrint Refactor Plan & PR Tracker
 
 **Created:** 2026-03-03-16-43
-**Last Updated:** 2026-03-03-16-43
+**Last Updated:** 2026-03-04-00-53
 
 Date created: 2026-03-03
 
@@ -18,6 +18,11 @@ The previous all-in-one PR was split into these tightly scoped PRs in this order
 - [refactor(python): modularize tokenprint providers and CLI entrypoint](https://github.com/sburl/TokenPrint/pull/11)
 
 Current intended merge order: 8 -> 9 -> 10 -> 11.
+
+Recent local updates:
+- PR #9 is still blocked from pushing its latest follow-up change until a GitHub token with `workflow` scope is available.
+- PR #10 received two additional scoped security/tests commits (`b5b80c2`, `b5cf57c`) pushed on top of initial daemon work.
+- PR #11 received a scoped provider lookup hardening commit (`bcd3d61`) and is pushed to branch.
 
 ## Operating Principles
 - Small, tightly scoped PRs.
@@ -36,7 +41,7 @@ Current intended merge order: 8 -> 9 -> 10 -> 11.
 | PR | Proposed Scope | Why this PR | Status | Dependencies | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 0 | Add baseline planning/assessment docs | Creates the planning and feedback structure first | ✅ complete | none | Creates `user-questions-and-answers.md` + `plan-and-pr-tracking.md` |
-| 1 | CI foundation + quality gates | Add `.github/workflows/ci.yml` with unit/integration split + nightly job shell | ✅ ready | none | Added `.github/workflows/ci.yml` with Python/Go PR checks and nightly extended checks |
+| 1 | CI foundation + quality gates | Add `.github/workflows/ci.yml` with unit/integration split + nightly job shell | ✅ ready | none | Added `.github/workflows/ci.yml` with Python/Go PR checks and nightly extended checks; follow-up concurrency changes are currently local only |
 | 2 | Accuracy/robustness hardening | Expand unit tests for parsing/date normalization and metric correctness edges | ✅ ready | 1 | Includes cache-write token energy math and Claude date-format parsing |
 | 3 | Provider collection audit | Improve provider parsing robustness + explicit invariants + tests | ✅ ready | 2 | Added guardrails for non-dict collector rows + malformed-entry test coverage |
 | 4 | Cache strategy cleanup | Make cache read/write versioned/migrated with invariant checks | ✅ ready | 3 | Added cache-version extraction, migration guardrails, and schema warning/repair paths |
