@@ -1117,6 +1117,25 @@ class TestComputeDashboardData:
         assert config["providerHasData"]["gemini"] is False
 
     @patch("tokenprint.detect_github_username", return_value="testuser")
+    def test_provider_has_data_includes_cache_write_tokens(self, mock_user):
+        data = merge_data({
+            "claude": {
+                "2026-01-15": {
+                    "provider": "claude",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 50,
+                    "cost": 0.01,
+                },
+            },
+            "codex": {},
+            "gemini": {},
+        })
+        config = compute_dashboard_data(data)
+        assert config["providerHasData"]["claude"] is True
+
+    @patch("tokenprint.detect_github_username", return_value="testuser")
     def test_raw_data_structure(self, mock_user):
         config = compute_dashboard_data(self._make_data())
         raw = config["rawData"]
@@ -1144,14 +1163,14 @@ class TestComputeDashboardData:
     def test_raw_data_field_ordering(self, mock_user):
         """Verify raw data arrays are [input, output, cached, cost] in correct order."""
         data = merge_data({
-            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 200, "cache_read_tokens": 300, "cache_write_tokens": 0, "cost": 0.50}},
+            "claude": {"2026-01-15": {"provider": "claude", "input_tokens": 100, "output_tokens": 200, "cache_read_tokens": 300, "cache_write_tokens": 50, "cost": 0.50}},
             "codex": {}, "gemini": {},
         })
         config = compute_dashboard_data(data)
         c = config["rawData"][0]["c"]
         assert c[0] == 100   # input
         assert c[1] == 200   # output
-        assert c[2] == 300   # cached
+        assert c[2] == 350   # cached (read + write)
         assert c[3] == 0.50  # cost
 
 

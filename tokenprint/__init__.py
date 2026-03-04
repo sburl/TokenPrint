@@ -1040,7 +1040,7 @@ def compute_dashboard_data(
     # Provider data presence (for default toggle state)
     provider_has_data = {
         name: any(
-            r[name]["input_tokens"] + r[name]["output_tokens"] + r[name]["cache_read_tokens"] > 0
+            r[name]["input_tokens"] + r[name]["output_tokens"] + r[name]["cache_read_tokens"] + r[name]["cache_write_tokens"] > 0
             for r in data
         )
         for name in provider_names()
@@ -1055,9 +1055,10 @@ def compute_dashboard_data(
     for r in data:
         row: dict[str, Any] = {"d": r["date"]}
         for p in PROVIDERS:
+            cached_tokens = r[p.name]["cache_read_tokens"] + r[p.name]["cache_write_tokens"]
             row[p.key] = [
                 r[p.name]["input_tokens"], r[p.name]["output_tokens"],
-                r[p.name]["cache_read_tokens"], round(r[p.name]["cost"], 4),
+                cached_tokens, round(r[p.name]["cost"], 4),
             ]
         raw_data.append(row)
 

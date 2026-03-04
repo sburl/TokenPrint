@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from tokenprint.constants import (
-    CLAUDE_RATE_CACHE_READ_MULTIPLIER,
-    CLAUDE_RATE_CACHE_WRITE_MULTIPLIER,
     CLAUDE_RATE_CACHED_PER_TOKEN,
     CLAUDE_RATE_INPUT_PER_TOKEN,
     CLAUDE_RATE_OUTPUT_PER_TOKEN,
