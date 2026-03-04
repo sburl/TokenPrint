@@ -216,6 +216,18 @@ func (a *App) refreshStart() bool {
 	return true
 }
 
+func (a *App) isTokenRequired() bool {
+	return a.cfg.RefreshToken != "" || !isLoopbackHost(a.cfg.Host)
+}
+
+func (a *App) requestHasValidToken(r *http.Request) bool {
+	if !a.isTokenRequired() {
+		return true
+	}
+	tok := strings.TrimSpace(r.Header.Get("X-Tokenprint-Token"))
+	return tok != "" && tok == a.cfg.RefreshToken
+}
+
 func (a *App) refreshFinish(err error, generatedAt string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -255,7 +267,11 @@ func writeJSON(w http.ResponseWriter, status int, payload map[string]any) {
 	_, _ = w.Write(raw)
 }
 
-func (a *App) statusHandler(w http.ResponseWriter, _ *http.Request) {
+func (a *App) statusHandler(w http.ResponseWriter, r *http.Request) {
+	if !a.requestHasValidToken(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
+		return
+	}
 	refreshing, generatedAt, lastError := a.statusSnapshot()
 	resp := map[string]any{
 		"ok":         true,
@@ -318,13 +334,9 @@ func (a *App) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "forbidden"})
 		return
 	}
-	requiresToken := a.cfg.RefreshToken != "" || !isLoopbackHost(a.cfg.Host)
-	if requiresToken {
-		tok := strings.TrimSpace(r.Header.Get("X-Tokenprint-Token"))
-		if tok == "" || tok != a.cfg.RefreshToken {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
-			return
-		}
+	if !a.requestHasValidToken(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
+		return
 	}
 
 	if !a.refreshStart() {

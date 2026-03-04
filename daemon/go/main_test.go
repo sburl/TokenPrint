@@ -334,6 +334,23 @@ func TestRefreshHandlerErrorPublishesStatusAndPreservesGeneratedAt(t *testing.T)
 	}
 }
 
+func TestStatusHandlerRequiresTokenForPublicHost(t *testing.T) {
+	app := newApp(Config{Host: "0.0.0.0"}, func(context.Context) error { return nil })
+	handler := app.handler()
+
+	publicStatus, publicBody, _ := performRequest(t, handler, http.MethodGet, "/api/status", "")
+	if publicStatus != http.StatusUnauthorized {
+		t.Fatalf("expected public host status to require token, got %d body=%s", publicStatus, publicBody)
+	}
+
+	app = newApp(Config{Host: "0.0.0.0", RefreshToken: "secret"}, func(context.Context) error { return nil })
+	handler = app.handler()
+	withTokenStatus, _, _ := performRequest(t, handler, http.MethodGet, "/api/status", "secret")
+	if withTokenStatus != http.StatusOK {
+		t.Fatalf("expected public host status with token to be 200, got %d", withTokenStatus)
+	}
+}
+
 func TestRefreshHandlerConflictWhileInProgress(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
