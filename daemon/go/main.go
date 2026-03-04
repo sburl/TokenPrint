@@ -1,9 +1,9 @@
 package main
 
 import (
-	"crypto/subtle"
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
