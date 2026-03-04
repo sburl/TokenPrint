@@ -7,77 +7,77 @@ and Gemini CLI (OpenTelemetry logs), then generates an interactive HTML dashboar
 showing usage trends, costs, and estimated environmental impact.
 
 Usage:
-    tokenprint [--since YYYYMMDD] [--until YYYYMMDD] [--no-cache] [--no-open] [--output PATH]
+    tokenprint [--since YYYYMMDD|YYYY-MM-DD] [--until YYYYMMDD|YYYY-MM-DD]
+    [--no-cache] [--no-open] [--output PATH]
 """
 
 from __future__ import annotations
 
 import argparse
+from contextlib import suppress
 import json
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 import os
-import re
+import math
+import shutil
 import subprocess
 import sys
 import tempfile
 import webbrowser
 from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    name: str           # "claude" — internal key
-    display_name: str   # "Claude Code" — shown in UI
-    key: str            # "c" — compact key in raw data JSON
-    color: str          # "#6366f1" — chart/legend color
-    collect_fn: str     # "collect_claude_data" — function name (string for mockability)
-    label: str          # "Claude Code (ccusage)" — status message during collection
-    rates: tuple[float, float, float]  # (input, output, cached) per-token USD rates
-
-
-PROVIDERS: tuple[ProviderConfig, ...] = (
-    ProviderConfig("claude", "Claude Code", "c", "#6366f1",
-                   "collect_claude_data", "Claude Code (ccusage)",
-                   (3e-6, 15e-6, 0.30e-6)),
-    ProviderConfig("codex", "Codex CLI", "x", "#22c55e",
-                   "collect_codex_data", "Codex CLI (@ccusage/codex)",
-                   (0.69e-6, 2.76e-6, 0.17e-6)),
-    ProviderConfig("gemini", "Gemini CLI", "g", "#f59e0b",
-                   "collect_gemini_data", "Gemini CLI (telemetry)",
-                   (1.25e-6, 10.0e-6, 0.125e-6)),
+from tokenprint.constants import (
+    CARBON_INTENSITY,
+    CLAUDE_RATE_BY_MODEL_PREFIX,
+    CLAUDE_RATE_CACHE_READ_MULTIPLIER,
+    CLAUDE_RATE_CACHE_WRITE_MULTIPLIER,
+    CLAUDE_RATE_CACHED_PER_TOKEN,
+    CLAUDE_RATE_INPUT_PER_TOKEN,
+    CLAUDE_RATE_OUTPUT_PER_TOKEN,
+    CODEX_RATE_CACHED_PER_TOKEN,
+    CODEX_RATE_INPUT_PER_TOKEN,
+    CODEX_RATE_OUTPUT_PER_TOKEN,
+    ELECTRICITY_COST_KWH,
+    EMBODIED_CARBON_FACTOR,
+    ENERGY_PER_CACHED_TOKEN_WH,
+    ENERGY_PER_INPUT_TOKEN_WH,
+    ENERGY_PER_OUTPUT_TOKEN_WH,
+    GEMINI_RATE_CACHED_PER_TOKEN,
+    GEMINI_RATE_INPUT_PER_TOKEN,
+    GEMINI_RATE_OUTPUT_PER_TOKEN,
+    GRID_LOSS_FACTOR,
+    PUE,
+    PROVIDER_CACHE_FILENAME,
+    PROVIDER_CACHE_SCHEMA_VERSION,
+    TOKENPRINT_CACHE_PATH_ENV_VAR,
+    GEMINI_TELEMETRY_LOG_PATH_ENV_VAR,
+    WATER_USE_EFFICIENCY,
+)
+from tokenprint.providers import (
+    ProviderConfig,
+    PROVIDERS,
+    provider_name_set,
+    provider_names,
+    resolve_provider,
 )
 
-# --- Energy / Carbon Model ---
-ENERGY_PER_OUTPUT_TOKEN_WH = 0.001
-ENERGY_PER_INPUT_TOKEN_WH = 0.0002
-ENERGY_PER_CACHED_TOKEN_WH = 0.00005
-PUE = 1.2                    # Power Usage Effectiveness (data center overhead)
-EMBODIED_CARBON_FACTOR = 1.2  # +20% for hardware manufacturing
-GRID_LOSS_FACTOR = 1.05       # 5% transmission losses (EIA)
-CARBON_INTENSITY = 390        # gCO2e per kWh (US average)
-WATER_USE_EFFICIENCY = 0.5    # liters per kWh
-ELECTRICITY_COST_KWH = 0.13  # USD per kWh (EIA commercial average)
-PROVIDER_CACHE_SCHEMA_VERSION = 1
-PROVIDER_CACHE_FILENAME = "tokenprint-provider-cache-v1.json"
+
+
+def _tokenprint_version() -> str:
+    """Return version from package metadata with safe fallback."""
+    try:
+        return _pkg_version("tokenprint")
+    except PackageNotFoundError:
+        return "0.0.0-dev"
+    except Exception:
+        return "0.0.0"
 
 # Claude pricing fallback for models that may appear unpriced in ccusage output.
 # Source: https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-02-20).
-CLAUDE_RATE_BY_MODEL_PREFIX: tuple[tuple[str, tuple[float, float]], ...] = (
-    ("claude-opus-4-6", (5e-6, 25e-6)),
-    ("claude-opus-4-5", (5e-6, 25e-6)),
-    ("claude-opus-4-1", (15e-6, 75e-6)),
-    ("claude-opus-4", (15e-6, 75e-6)),
-    ("claude-sonnet-4-6", (3e-6, 15e-6)),
-    ("claude-sonnet-4-5", (3e-6, 15e-6)),
-    ("claude-sonnet-4", (3e-6, 15e-6)),
-    ("claude-sonnet-3-7", (3e-6, 15e-6)),
-    ("claude-haiku-4-5", (1e-6, 5e-6)),
-    ("claude-haiku-3-5", (0.8e-6, 4e-6)),
-    ("claude-haiku-3", (0.25e-6, 1.25e-6)),
-)
 
 
 def run_command(cmd: list[str], timeout: int = 60) -> str | None:
@@ -89,16 +89,55 @@ def run_command(cmd: list[str], timeout: int = 60) -> str | None:
         if result.returncode == 0:
             return result.stdout.strip()
         return None
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None
+
+
+def _warn(message: str) -> None:
+    """Emit a warning to stderr."""
+    print(f"  [warn] {message}", file=sys.stderr)
+
+
+def _info(message: str) -> None:
+    """Emit an info message to stderr."""
+    print(f"  [info] {message}", file=sys.stderr)
+
+
+def _command_exists(name: str) -> bool:
+    """Return whether a command exists in PATH."""
+    return shutil.which(name) is not None
+
+
+def _run_cli_check() -> bool:
+    """Run a quick CLI preflight check. Returns True on success."""
+    checks: dict[str, bool] = {
+        "template": (Path(__file__).resolve().parent / "template.html").exists(),
+        "ccusage": _command_exists("ccusage"),
+        "ccusage-codex": _command_exists("ccusage-codex"),
+    }
+    ok = True
+    print("tokenprint checks:")
+    for name, result in checks.items():
+        if result:
+            print(f"  [ok] {name}")
+        else:
+            print(f"  [missing] {name}")
+            if name in {"template", "ccusage"}:
+                ok = False
+    return ok
 
 
 def _safe_float(val: Any) -> float:
     """Convert a value to float safely."""
+    if isinstance(val, bool):
+        return 0.0
     try:
-        return float(val)
+        value = float(val)
     except (TypeError, ValueError):
         return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return value
 
 
 def detect_github_username() -> str:
@@ -114,7 +153,7 @@ def detect_github_username() -> str:
         if username:
             return username
     except (EOFError, KeyboardInterrupt):
-        pass
+        return "dev"
     return "dev"
 
 
@@ -139,8 +178,8 @@ def _estimate_claude_model_cost(model_row: dict[str, Any]) -> float:
     input_rate, output_rate = rates
     # Claude prompt caching published multipliers:
     # 5-minute write tokens are 1.25x input, cache reads are 0.1x input.
-    cache_write_rate = input_rate * 1.25
-    cache_read_rate = input_rate * 0.10
+    cache_write_rate = input_rate * CLAUDE_RATE_CACHE_WRITE_MULTIPLIER
+    cache_read_rate = input_rate * CLAUDE_RATE_CACHE_READ_MULTIPLIER
 
     input_tok = _safe_int(model_row.get("inputTokens", model_row.get("input_tokens", 0)))
     output_tok = _safe_int(model_row.get("outputTokens", model_row.get("output_tokens", 0)))
@@ -155,6 +194,14 @@ def _estimate_claude_model_cost(model_row: dict[str, Any]) -> float:
     )
 
 
+def _rates_for_provider(name: str) -> tuple[float, float, float]:
+    """Return configured per-token rates for a provider, or zeros when unknown."""
+    provider = resolve_provider(name)
+    if provider is None:
+        return 0.0, 0.0, 0.0
+    return provider.rates
+
+
 def collect_claude_data(since: str | None = None, until: str | None = None) -> dict[str, dict[str, Any]]:
     """Collect Claude Code usage via ccusage."""
     cmd = ["ccusage", "daily", "--json"]
@@ -165,23 +212,28 @@ def collect_claude_data(since: str | None = None, until: str | None = None) -> d
 
     output = run_command(cmd, timeout=120)
     if not output:
-        print("  [skip] ccusage not available or returned no data", file=sys.stderr)
+        _warn("ccusage not available or returned no data")
         return {}
 
     try:
         raw = json.loads(output)
     except json.JSONDecodeError:
-        print("  [skip] ccusage returned invalid JSON", file=sys.stderr)
+        _warn("ccusage returned invalid JSON")
         return {}
 
     # ccusage wraps data in {"daily": [...]}
     data = raw.get("daily", raw) if isinstance(raw, dict) else raw
+    if not isinstance(data, list):
+        _warn("ccusage returned unexpected JSON shape")
+        return {}
 
     daily: dict[str, dict[str, Any]] = {}
     estimated_missing_cost_total = 0.0
     estimated_models: set[str] = set()
     for entry in data:
-        date = entry.get("date", "")
+        if not isinstance(entry, dict):
+            continue
+        date = _parse_date_flexible(entry.get("date", ""))
         if not date:
             continue
         day_cost = _safe_float(entry.get("totalCost", 0) or 0)
@@ -217,23 +269,23 @@ def collect_claude_data(since: str | None = None, until: str | None = None) -> d
                 "input_tokens": 0, "output_tokens": 0,
                 "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
             }
-        daily[date]["input_tokens"] += entry.get("inputTokens", 0) or 0
-        daily[date]["output_tokens"] += entry.get("outputTokens", 0) or 0
-        daily[date]["cache_read_tokens"] += entry.get("cacheReadTokens", 0) or 0
-        daily[date]["cache_write_tokens"] += entry.get("cacheCreationTokens", 0) or 0
+        daily[date]["input_tokens"] += _safe_int(entry.get("inputTokens", 0))
+        daily[date]["output_tokens"] += _safe_int(entry.get("outputTokens", 0))
+        daily[date]["cache_read_tokens"] += _safe_int(entry.get("cacheReadTokens", 0))
+        daily[date]["cache_write_tokens"] += _safe_int(entry.get("cacheCreationTokens", 0))
         daily[date]["cost"] += day_cost
 
     if estimated_missing_cost_total > 0:
         models_str = ", ".join(sorted(estimated_models)) if estimated_models else "unknown models"
-        print(
-            f"  [info] Added ${estimated_missing_cost_total:.2f} estimated Claude cost for unpriced models: {models_str}",
-            file=sys.stderr,
-        )
+        _info(f"Added ${estimated_missing_cost_total:.2f} estimated Claude cost for unpriced models: {models_str}")
     return daily
 
 
 def _parse_date_flexible(date_str: str | None) -> str | None:
     """Parse dates in ISO (2026-01-07) or human (Jan 7, 2026) format to YYYY-MM-DD."""
+    if not date_str:
+        return None
+    date_str = date_str.strip()
     if not date_str:
         return None
     # Try ISO format first (validate calendar correctness)
@@ -244,6 +296,12 @@ def _parse_date_flexible(date_str: str | None) -> str | None:
             return candidate
         except ValueError:
             return None
+    # Support compact YYYYMMDD (for provider/cache rows)
+    if len(date_str) == 8 and date_str.isdigit():
+        try:
+            return datetime.strptime(date_str, "%Y%m%d").strftime("%Y-%m-%d")
+        except ValueError:
+            return None
     # Try human-readable formats
     for fmt in ("%b %d, %Y", "%B %d, %Y", "%b %d %Y"):
         try:
@@ -251,6 +309,135 @@ def _parse_date_flexible(date_str: str | None) -> str | None:
         except ValueError:
             continue
     return None
+
+
+def _normalize_cache_date_key(date_key: str) -> str | None:
+    """Normalize cache date keys to YYYY-MM-DD."""
+    iso = _parse_date_flexible(date_key)
+    return iso
+
+
+def _normalize_timezone_name(timezone_name: str | None) -> str:
+    """Return a validated IANA timezone name (or UTC for blank input)."""
+    candidate = (timezone_name or "UTC").strip() or "UTC"
+    try:
+        ZoneInfo(candidate)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"unknown timezone: {candidate}") from exc
+    return candidate
+
+
+def _normalize_cli_date_arg(date_arg: str | None) -> str | None:
+    """Normalize CLI date args to YYYYMMDD strings."""
+    if not date_arg:
+        return None
+    date_arg = date_arg.strip()
+    if not date_arg:
+        return None
+    if len(date_arg) == 8 and date_arg.isdigit():
+        try:
+            return datetime.strptime(date_arg, "%Y%m%d").strftime("%Y%m%d")
+        except ValueError:
+            return None
+    if len(date_arg) >= 10 and date_arg[4] == "-" and date_arg[7] == "-":
+        if len(date_arg) > 10 and date_arg[10] not in {"T", " "}:
+            return None
+        try:
+            return datetime.strptime(date_arg[:10], "%Y-%m-%d").strftime("%Y%m%d")
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_gemini_timestamp(ts: Any, timezone_name: str = "UTC") -> str | None:
+    """Parse Gemini timestamp values into YYYY-MM-DD."""
+    try:
+        tz = ZoneInfo(_normalize_timezone_name(timezone_name))
+    except ValueError:
+        return None
+    if ts is None:
+        return None
+    if isinstance(ts, bool):
+        return None
+
+    if isinstance(ts, str):
+        raw_ts = ts.strip()
+        if not raw_ts:
+            return None
+        if raw_ts.endswith("Z"):
+            raw_ts = raw_ts[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw_ts)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(tz).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+        try:
+            return _parse_gemini_timestamp(float(raw_ts), timezone_name=timezone_name)
+        except (TypeError, ValueError):
+            return None
+
+    if isinstance(ts, (int, float)):
+        try:
+            ts_float = float(ts)
+        except (TypeError, ValueError):
+            return None
+        if ts_float <= 0 or ts_float != ts_float:
+            return None
+        if not math.isfinite(ts_float):
+            return None
+        if ts_float >= 10**18:
+            ts_float /= 1_000_000_000
+        elif ts_float >= 10**15:
+            ts_float /= 1_000_000
+        elif ts_float >= 10**12:
+            ts_float /= 1_000
+        try:
+            return datetime.fromtimestamp(ts_float, tz=timezone.utc).astimezone(tz).strftime("%Y-%m-%d")
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    if not isinstance(ts, str):
+        ts = str(ts).strip()
+        if not ts:
+            return None
+
+    date_prefix = _parse_date_flexible(ts[:10]) if len(ts) >= 10 else None
+    if date_prefix:
+        return date_prefix
+    return None
+
+
+def _normalize_gemini_attributes(raw_attrs: Any) -> dict[str, Any] | None:
+    """Normalize Gemini attribute payloads into a key/value dict."""
+    if isinstance(raw_attrs, dict):
+        attrs: dict[str, Any] = {}
+        for key, val in raw_attrs.items():
+            if not isinstance(key, str) or not key:
+                continue
+            if isinstance(val, dict):
+                attrs[key] = val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
+            else:
+                attrs[key] = val
+        return attrs
+    if not isinstance(raw_attrs, list):
+        return None
+
+    attrs: dict[str, Any] = {}
+    for item in raw_attrs:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("Key", item.get("key"))
+        if not isinstance(key, str) or not key:
+            continue
+        val = item.get("Value", item.get("value", 0))
+        if isinstance(val, dict):
+            val = (
+                val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
+            )
+        attrs[key] = val
+    return attrs
 
 
 def _run_codex_json_command(since: str | None = None, until: str | None = None) -> Any:
@@ -282,34 +469,37 @@ def collect_codex_data(since: str | None = None, until: str | None = None) -> di
     """Collect Codex CLI usage via @ccusage/codex."""
     raw = _run_codex_json_command(since, until)
     if raw is None:
-        print("  [skip] @ccusage/codex unavailable (missing install or invalid JSON)", file=sys.stderr)
-        print("         Install once: npm i -g @ccusage/codex@18", file=sys.stderr)
+        _warn("@ccusage/codex unavailable (missing install or invalid JSON)")
+        _warn("       Install once: npm i -g @ccusage/codex@18")
         return {}
 
     # @ccusage/codex wraps data in {"daily": [...]}
     data = raw.get("daily", raw) if isinstance(raw, dict) else raw
+    if not isinstance(data, list):
+        _warn("@ccusage/codex returned unexpected JSON shape")
+        return {}
 
     # First pass: collect all entries
     entries: list[tuple[str, int, int, int, float]] = []
     for entry in data:
+        if not isinstance(entry, dict):
+            continue
         raw_date = entry.get("date", "")
         if not raw_date:
             continue
         date = _parse_date_flexible(raw_date)
         if not date:
             continue
-        raw_input = entry.get("inputTokens", 0) or 0
-        output_tok = entry.get("outputTokens", 0) or 0
-        cached_tok = entry.get("cachedInputTokens", 0) or 0
+        raw_input = _safe_int(entry.get("inputTokens", 0))
+        output_tok = _safe_int(entry.get("outputTokens", 0))
+        cached_tok = _safe_int(entry.get("cachedInputTokens", 0))
         # Codex inputTokens includes cached — subtract to get non-cached input
         input_tok = max(0, raw_input - cached_tok)
-        cost = entry.get("costUSD", 0) or 0
+        cost = _safe_float(entry.get("costUSD", 0))
         entries.append((date, input_tok, output_tok, cached_tok, cost))
 
-    # Use gpt-5-codex pricing for all unpriced days (including gpt-5.3-codex)
-    rate_input = 0.69e-6    # $0.69/M input tokens
-    rate_output = 2.76e-6   # $2.76/M output tokens
-    rate_cached = 0.17e-6   # $0.17/M cached tokens
+    # Use codex provider rates for all unpriced days (including gpt-5.3-codex)
+    rate_input, rate_output, rate_cached = _rates_for_provider("codex")
 
     daily: dict[str, dict[str, Any]] = {}
     for date, input_tok, output_tok, cached_tok, cost in entries:
@@ -328,12 +518,17 @@ def collect_codex_data(since: str | None = None, until: str | None = None) -> di
     return daily
 
 
-def collect_gemini_data(since: str | None = None, until: str | None = None) -> dict[str, dict[str, Any]]:
+def collect_gemini_data(
+    since: str | None = None,
+    until: str | None = None,
+    timezone_name: str = "UTC",
+    log_path: str | None = None,
+) -> dict[str, dict[str, Any]]:
     """Collect Gemini CLI usage from OpenTelemetry log."""
-    log_path = Path.home() / ".gemini" / "telemetry.log"
+    log_path = _resolve_gemini_log_path(log_path)
     if not log_path.exists():
-        print("  [skip] Gemini telemetry log not found (~/.gemini/telemetry.log)", file=sys.stderr)
-        print("         Run: bash install.sh (or bash setup-gemini-telemetry.sh)", file=sys.stderr)
+        _warn(f"Gemini telemetry log not found: {log_path}")
+        _warn("       Run: bash install.sh (or bash setup-gemini-telemetry.sh)")
         return {}
 
     daily: dict[str, dict[str, Any]] = defaultdict(lambda: {
@@ -344,7 +539,7 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
     })
 
     try:
-        with open(log_path) as f:
+        with open(log_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -353,15 +548,13 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(record, dict):
+                    continue
 
                 # Extract timestamp for date grouping
-                ts = record.get("timestamp") or record.get("time") or record.get("Timestamp") or ""
-                if not ts:
-                    continue
-                try:
-                    date = ts[:10]  # YYYY-MM-DD
-                    datetime.strptime(date, "%Y-%m-%d")
-                except (ValueError, IndexError):
+                raw_ts = record.get("timestamp") or record.get("time") or record.get("Timestamp")
+                date = _parse_gemini_timestamp(raw_ts, timezone_name)  # supports ISO, epoch, and millis
+                if not date:
                     continue
 
                 # Apply date filters
@@ -372,18 +565,8 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
                     continue
 
                 # Look for token usage in attributes or body
-                attrs = record.get("attributes", record.get("Attributes", {}))
-                if isinstance(attrs, list):
-                    attrs_dict: dict[str, Any] = {}
-                    for a in attrs:
-                        if not isinstance(a, dict):
-                            continue
-                        key = a.get("Key", a.get("key", ""))
-                        val = a.get("Value", a.get("value", {}))
-                        if isinstance(val, dict):
-                            val = val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
-                        attrs_dict[key] = val
-                    attrs = attrs_dict
+                raw_attrs = record.get("attributes", record.get("Attributes", {}))
+                attrs = _normalize_gemini_attributes(raw_attrs)
                 if not isinstance(attrs, dict):
                     continue
 
@@ -398,14 +581,14 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
                     daily[date]["output_tokens"] += output_tok
                     daily[date]["cache_read_tokens"] += cached_tok
     except (OSError, PermissionError):
-        print("  [skip] Could not read Gemini telemetry log (permission or I/O error)", file=sys.stderr)
+        _warn("Could not read Gemini telemetry log (permission or I/O error)")
         return {}
 
     # Estimate Gemini costs (Gemini 2.5 Pro pricing, cached = 10% of input rate)
     for d in daily.values():
-        input_cost = d["input_tokens"] * 1.25 / 1_000_000
-        output_cost = d["output_tokens"] * 10.00 / 1_000_000
-        cached_cost = d["cache_read_tokens"] * 0.125 / 1_000_000
+        input_cost = d["input_tokens"] * GEMINI_RATE_INPUT_PER_TOKEN
+        output_cost = d["output_tokens"] * GEMINI_RATE_OUTPUT_PER_TOKEN
+        cached_cost = d["cache_read_tokens"] * GEMINI_RATE_CACHED_PER_TOKEN
         d["cost"] = input_cost + output_cost + cached_cost
 
     return dict(daily)
@@ -413,15 +596,134 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
 
 def _safe_int(val: Any) -> int:
     """Convert a value to int safely."""
-    try:
-        return int(val)
-    except (TypeError, ValueError):
+    if isinstance(val, bool):
         return 0
+    try:
+        value = int(val)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    if isinstance(val, float) and not math.isfinite(val):
+        return 0
+    return value
 
 
 def _provider_cache_path() -> Path:
     """Return the provider cache location."""
     return Path(tempfile.gettempdir()) / PROVIDER_CACHE_FILENAME
+
+
+def _empty_provider_cache() -> dict[str, dict[str, dict[str, Any]]:
+    """Return a zero-value provider cache payload."""
+    return {name: {} for name in provider_names()}
+
+
+def _warn_cache(message: str) -> None:
+    _warn(message)
+
+
+def _coerce_cache_schema_version(version: Any) -> int | None:
+    """Normalize a cache schema version value, rejecting invalid or non-integer values."""
+    if isinstance(version, bool):
+        return None
+
+    if isinstance(version, int):
+        return version
+
+    if isinstance(version, float):
+        if not math.isfinite(version) or not version.is_integer():
+            return None
+        return int(version)
+
+    if isinstance(version, str):
+        cleaned = version.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned)
+        except (TypeError, ValueError):
+            try:
+                version_float = float(cleaned)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(version_float) or not version_float.is_integer():
+                return None
+            return int(version_float)
+
+    return None
+
+
+def _extract_provider_payload(
+    raw: Any,
+) -> tuple[dict[str, Any] | None, int]:
+    """Extract provider payload and schema version from raw cache JSON."""
+    if not isinstance(raw, dict):
+        return None, 0
+
+    known_provider_names = provider_name_set()
+    if "version" in raw:
+        known_version = _coerce_cache_schema_version(raw.get("version"))
+        if known_version is None:
+            return None, 0
+    else:
+        known_version = 1
+
+    if "providers" in raw:
+        providers = raw.get("providers")
+        if not isinstance(providers, dict):
+            return None, 0
+        if not isinstance(known_version, int):
+            return None, 0
+        return providers, known_version
+
+    if not isinstance(known_version, int):
+        return None, 0
+
+    if any(provider_name in raw for provider_name in known_provider_names):
+        return raw, known_version
+    return None, 0
+
+
+def _migrate_provider_payload(
+    provider_payload: dict[str, Any],
+    cache_version: int,
+) -> dict[str, Any]:
+    """Migrate cache payloads from older schema versions."""
+    if cache_version <= 0:
+        _warn_cache(f"Invalid cache schema version: {cache_version}; ignoring cache")
+        return {}
+
+    if cache_version > PROVIDER_CACHE_SCHEMA_VERSION:
+        _warn_cache(
+            f"Cache schema version {cache_version} is newer than "
+            f"supported ({PROVIDER_CACHE_SCHEMA_VERSION}); ignoring cache"
+        )
+        return {}
+
+    # current migration is additive and schema-compatible.
+    return provider_payload
+
+
+def _resolve_cache_path(cache_path: str | None) -> Path | None:
+    """Resolve user-provided cache path into a concrete file path."""
+    resolved_path = (cache_path or os.environ.get(TOKENPRINT_CACHE_PATH_ENV_VAR, "")).strip()
+    if not resolved_path:
+        return None
+    path = Path(resolved_path).expanduser()
+    if path.is_dir():
+        return path / PROVIDER_CACHE_FILENAME
+    return path
+
+
+def _resolve_gemini_log_path(log_path: str | None = None) -> Path:
+    """Resolve Gemini telemetry log path from explicit value or environment."""
+    resolved_path = (log_path or os.environ.get(GEMINI_TELEMETRY_LOG_PATH_ENV_VAR, "")).strip()
+    if not resolved_path:
+        return Path.home() / ".gemini" / "telemetry.log"
+
+    path = Path(resolved_path).expanduser()
+    if path.is_dir():
+        return path / "telemetry.log"
+    return path
 
 
 def _next_day_compact(date_iso: str) -> str | None:
@@ -436,10 +738,7 @@ def _normalize_provider_day(provider_name: str, raw: Any) -> dict[str, Any] | No
     """Normalize a cached provider day payload to the expected shape."""
     if not isinstance(raw, dict):
         return None
-    try:
-        cost = float(raw.get("cost", 0) or 0)
-    except (TypeError, ValueError):
-        cost = 0.0
+    cost = _safe_float(raw.get("cost", 0))
     return {
         "provider": provider_name,
         "input_tokens": max(0, _safe_int(raw.get("input_tokens", 0))),
@@ -453,41 +752,49 @@ def _normalize_provider_day(provider_name: str, raw: Any) -> dict[str, Any] | No
 def _load_provider_cache(cache_path: Path | None = None) -> dict[str, dict[str, dict[str, Any]]]:
     """Load provider cache from disk; returns empty maps on any issue."""
     cache_file = cache_path or _provider_cache_path()
-    empty: dict[str, dict[str, dict[str, Any]]] = {p.name: {} for p in PROVIDERS}
+    empty = _empty_provider_cache()
     if not cache_file.exists():
         return empty
 
     try:
-        with open(cache_file) as f:
+        with open(cache_file, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, json.JSONDecodeError):
+        _warn_cache("Could not read provider cache file")
         return empty
 
     if not isinstance(raw, dict):
-        return empty
-    if raw.get("version") != PROVIDER_CACHE_SCHEMA_VERSION:
-        return empty
-
-    providers_blob = raw.get("providers")
-    if not isinstance(providers_blob, dict):
+        _warn_cache("Provider cache has invalid top-level structure")
         return empty
 
-    normalized: dict[str, dict[str, dict[str, Any]]] = {p.name: {} for p in PROVIDERS}
-    for p in PROVIDERS:
-        raw_provider = providers_blob.get(p.name, {})
+    providers_blob, cache_version = _extract_provider_payload(raw)
+    if providers_blob is None:
+        _warn_cache("Provider cache has unrecognized format")
+        return empty
+
+    migrated_payload = _migrate_provider_payload(providers_blob, cache_version)
+    if not migrated_payload:
+        return empty
+
+    normalized: dict[str, dict[str, dict[str, Any]]] = _empty_provider_cache()
+    for name in provider_names():
+        raw_provider = migrated_payload.get(name, {})
         if not isinstance(raw_provider, dict):
+            _warn_cache(f"Ignoring invalid provider payload for '{name}'")
             continue
         provider_days: dict[str, dict[str, Any]] = {}
         for date_key, entry in raw_provider.items():
             if not isinstance(date_key, str):
+                _warn_cache(f"Ignoring non-string cache date key for '{name}'")
                 continue
-            iso_date = _parse_date_flexible(date_key)
+            iso_date = _normalize_cache_date_key(date_key)
             if not iso_date:
+                _warn_cache(f"Ignoring invalid cache date key '{date_key}' for '{name}'")
                 continue
-            normalized_entry = _normalize_provider_day(p.name, entry)
+            normalized_entry = _normalize_provider_day(name, entry)
             if normalized_entry:
                 provider_days[iso_date] = normalized_entry
-        normalized[p.name] = provider_days
+        normalized[name] = provider_days
 
     return normalized
 
@@ -505,53 +812,119 @@ def _save_provider_cache(
     }
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(cache_file, "w") as f:
-            json.dump(payload, f, separators=(",", ":"))
-    except OSError:
-        print("  [warn] Could not write provider cache", file=sys.stderr)
+        _write_text_atomic(cache_file, json.dumps(payload, separators=(",", ":")))
+    except OSError as exc:
+        _warn(f"Could not write provider cache at {cache_file}: {exc}")
 
 
-def _collect_provider_data(since: str | None = None, until: str | None = None) -> dict[str, dict[str, dict[str, Any]]]:
+def _collect_days_with_fallback(
+    provider: ProviderConfig,
+    since: str | None,
+    until: str | None,
+    *,
+    mode: str = "collection",
+    timezone_name: str = "UTC",
+    gemini_log_path: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Collect provider day rows with a shared failure-to-empty normalization path."""
+    collector = getattr(sys.modules[__name__], provider.collect_fn)
+    try:
+        if provider.name == "gemini":
+            if gemini_log_path is None:
+                raw_data = collector(since, until, timezone_name)
+            else:
+                raw_data = collector(since, until, timezone_name, log_path=gemini_log_path)
+        else:
+            raw_data = collector(since, until)
+    except Exception as exc:
+        _warn(f"{provider.label} {mode} failed: {exc}")
+        return {}
+    if not isinstance(raw_data, dict):
+        _warn(f"{provider.label} returned invalid data for {mode}")
+        return {}
+    return raw_data
+
+
+def _collect_provider_data(
+    since: str | None = None,
+    until: str | None = None,
+    timezone_name: str = "UTC",
+    gemini_log_path: str | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
     """Collect provider data for an explicit date window."""
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
     for p in PROVIDERS:
         print(f"  {p.label}...", file=sys.stderr)
-        collector = getattr(sys.modules[__name__], p.collect_fn)
-        data = collector(since, until)
+        data = _collect_days_with_fallback(
+            p,
+            since,
+            until,
+            mode="collection",
+            timezone_name=timezone_name,
+            gemini_log_path=gemini_log_path,
+        )
         print(f"    {len(data)} days", file=sys.stderr)
         provider_data[p.name] = data
     return provider_data
 
 
-def _collect_provider_data_incremental() -> dict[str, dict[str, dict[str, Any]]]:
+def _collect_provider_data_incremental(
+    cache_path: Path | None = None,
+    timezone_name: str = "UTC",
+    gemini_log_path: str | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
     """Collect provider data incrementally from cache, per provider."""
     today_compact = datetime.now().strftime("%Y%m%d")
-    cached_provider_data = _load_provider_cache()
+    cached_provider_data = _load_provider_cache(cache_path=cache_path)
     provider_data: dict[str, dict[str, dict[str, Any]]] = {}
 
     for p in PROVIDERS:
         print(f"  {p.label}...", file=sys.stderr)
-        collector = getattr(sys.modules[__name__], p.collect_fn)
         cached_days = cached_provider_data.get(p.name, {})
+        if not isinstance(cached_days, dict):
+            _warn(f"{p.label} cache payload was invalid; rebuilding full history")
+            cached_days = {}
         fresh_days: dict[str, dict[str, Any]] = {}
 
         if not cached_days:
             # No prior cache for this provider — fetch full history.
-            fresh_days = collector(None, None)
+            fresh_days = _collect_days_with_fallback(
+                p,
+                None,
+                None,
+                mode="full collection",
+                timezone_name=timezone_name,
+                gemini_log_path=gemini_log_path,
+            )
             combined_days = dict(fresh_days)
         else:
             latest_cached = max(cached_days.keys())
             since = _next_day_compact(latest_cached)
             if not since:
-                fresh_days = collector(None, None)
+                fresh_days = _collect_days_with_fallback(
+                    p,
+                    None,
+                    None,
+                    mode="full collection",
+                    timezone_name=timezone_name,
+                    gemini_log_path=gemini_log_path,
+                )
             elif since > today_compact:
                 print("    up to date (cache)", file=sys.stderr)
             else:
                 print(f"    incremental since {since}", file=sys.stderr)
-                fresh_days = collector(since, today_compact)
+                fresh_days = _collect_days_with_fallback(
+                    p,
+                    since,
+                    today_compact,
+                    mode="incremental collection",
+                    timezone_name=timezone_name,
+                    gemini_log_path=gemini_log_path,
+                )
 
             combined_days = dict(cached_days)
-            combined_days.update(fresh_days)
+            if fresh_days:
+                combined_days.update(fresh_days)
 
         print(f"    {len(combined_days)} days", file=sys.stderr)
         provider_data[p.name] = combined_days
@@ -586,21 +959,31 @@ def merge_data(
 ) -> list[dict[str, Any]]:
     """Merge all provider data into a unified daily dataset."""
     all_dates = sorted({d for pdata in provider_data.values() for d in pdata})
-    provider_names = [p.name for p in PROVIDERS]
+    names = provider_names()
 
     merged = []
     for date in all_dates:
         row: dict[str, Any] = {"date": date}
-        for name in provider_names:
+        for name in names:
             pdata = provider_data.get(name, {})
             if date in pdata:
-                d = pdata[date]
-                energy = calculate_energy(d["input_tokens"], d["output_tokens"], d["cache_read_tokens"])
+                raw_row = pdata[date]
+                if not isinstance(raw_row, dict):
+                    raw_row = {}
+
+                input_tokens = _safe_int(raw_row.get("input_tokens", 0))
+                output_tokens = _safe_int(raw_row.get("output_tokens", 0))
+                cache_read_tokens = _safe_int(raw_row.get("cache_read_tokens", 0))
+                cache_write_tokens = _safe_int(raw_row.get("cache_write_tokens", 0))
+                cached_tokens = cache_read_tokens + cache_write_tokens
+                cost = _safe_float(raw_row.get("cost", 0))
+
+                energy = calculate_energy(input_tokens, output_tokens, cached_tokens)
                 row[name] = {
-                    "input_tokens": d["input_tokens"],
-                    "output_tokens": d["output_tokens"],
-                    "cache_read_tokens": d["cache_read_tokens"],
-                    "cost": round(d["cost"], 4),
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_tokens": cache_read_tokens,
+                    "cost": round(cost, 4),
                     "energy_wh": round(energy, 4),
                     "carbon_g": round(calculate_carbon(energy), 4),
                     "water_ml": round(calculate_water(energy), 4),
@@ -632,11 +1015,11 @@ def compute_dashboard_data(
 
     # Provider data presence (for default toggle state)
     provider_has_data = {
-        p.name: any(
-            r[p.name]["input_tokens"] + r[p.name]["output_tokens"] + r[p.name]["cache_read_tokens"] > 0
+        name: any(
+            r[name]["input_tokens"] + r[name]["output_tokens"] + r[name]["cache_read_tokens"] > 0
             for r in data
         )
-        for p in PROVIDERS
+        for name in provider_names()
     }
 
     # Date range
@@ -688,7 +1071,7 @@ def _render_html_from_config(config: dict[str, Any]) -> str:
     config_json = _json_dumps_html_safe(config)
 
     template_path = Path(__file__).resolve().parent / "template.html"
-    with open(template_path) as f:
+    with open(template_path, encoding="utf-8") as f:
         template = f.read()
 
     return template.replace("TOKENPRINT_DATA_PLACEHOLDER", config_json)
@@ -698,9 +1081,7 @@ def generate_html(data: list[dict[str, Any]], output_path: str) -> None:
     """Generate the self-contained HTML dashboard from template."""
     config = compute_dashboard_data(data)
     html = _render_html_from_config(config)
-
-    with open(output_path, "w") as f:
-        f.write(html)
+    _write_html_file(output_path, html)
 
 
 def _default_output_path() -> str:
@@ -708,27 +1089,95 @@ def _default_output_path() -> str:
     return os.path.join(tempfile.gettempdir(), "tokenprint.html")
 
 
+def _default_output_path_json() -> str:
+    """Return default JSON output path."""
+    return os.path.join(tempfile.gettempdir(), "tokenprint.json")
+
+
+def _write_json_file(output_path: str, payload: dict[str, Any]) -> None:
+    """Write JSON payload to output path."""
+    _write_output_file(output_path, json.dumps(payload), "JSON output")
+
+
 def _write_html_file(output_path: str, html: str) -> None:
     """Write rendered HTML to output path."""
-    with open(output_path, "w") as f:
-        f.write(html)
+    _write_output_file(output_path, html, "dashboard file")
 
 
-def _collect_merged_usage_data(since: str | None, until: str | None, no_cache: bool) -> list[dict[str, Any]]:
+def _write_output_file(output_path: str, content: str, label: str) -> None:
+    """Write arbitrary output text with a user-friendly error path."""
+    path = Path(output_path)
+    if path.exists() and path.is_dir():
+        raise RuntimeError(f"unable to write {label} at {output_path}: target is a directory")
+    try:
+        _write_text_atomic(path, content)
+    except OSError as exc:
+        raise RuntimeError(f"unable to write {label} at {output_path}: {exc}") from exc
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    """Write text to disk using an atomic replace after completing a full write."""
+    temp_file_path: Path | None = None
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_file_path = Path(temp_file.name)
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_file_path, path)
+    except OSError:
+        if temp_file_path is not None and temp_file_path.exists():
+            with suppress(OSError):
+                temp_file_path.unlink()
+        raise
+
+
+def _collect_merged_usage_data(
+    since: str | None,
+    until: str | None,
+    no_cache: bool,
+    cache_path: Path | None = None,
+    timezone_name: str = "UTC",
+    gemini_log_path: str | None = None,
+) -> list[dict[str, Any]]:
     """Collect provider data and return merged daily rows."""
     is_default_range = not since and not until
     if is_default_range and not no_cache:
         print("Collecting AI usage data (incremental)...")
-        provider_data = _collect_provider_data_incremental()
+        if gemini_log_path is None:
+            provider_data = _collect_provider_data_incremental(cache_path=cache_path, timezone_name=timezone_name)
+        else:
+            provider_data = _collect_provider_data_incremental(
+                cache_path=cache_path,
+                timezone_name=timezone_name,
+                gemini_log_path=gemini_log_path,
+            )
     else:
         print("Collecting AI usage data...")
-        provider_data = _collect_provider_data(since, until)
+        if gemini_log_path is None:
+            provider_data = _collect_provider_data(since, until, timezone_name=timezone_name)
+        else:
+            provider_data = _collect_provider_data(
+                since,
+                until,
+                timezone_name=timezone_name,
+                gemini_log_path=gemini_log_path,
+            )
 
     if not any(provider_data.values()):
         raise RuntimeError("No usage data found from any source.")
 
     if is_default_range:
-        _save_provider_cache(provider_data)
+        _save_provider_cache(provider_data, cache_path=cache_path)
 
     merged = merge_data(provider_data)
     print(f"\nMerged: {len(merged)} days of data", file=sys.stderr)
@@ -738,28 +1187,70 @@ def _collect_merged_usage_data(since: str | None, until: str | None, no_cache: b
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate AI usage & impact dashboard")
-    parser.add_argument("--since", help="Start date (YYYYMMDD)")
-    parser.add_argument("--until", help="End date (YYYYMMDD)")
+    parser.add_argument("--since", help="Start date (YYYYMMDD or YYYY-MM-DD)")
+    parser.add_argument("--until", help="End date (YYYYMMDD or YYYY-MM-DD)")
     parser.add_argument("--no-cache", action="store_true", help="Force full refresh (ignore incremental cache)")
     parser.add_argument("--live-mode", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--refresh-endpoint", default="/api/refresh", help=argparse.SUPPRESS)
     parser.add_argument("--refresh-token", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--version", action="version", version=f"tokenprint {_tokenprint_version()}")
     parser.add_argument("--no-open", action="store_true", help="Don't open in browser")
-    parser.add_argument("--output", help="Output HTML path")
+    parser.add_argument("--output", help="Output path")
+    parser.add_argument("--cache-path", default="", help="Optional provider cache path (default: temp directory)")
+    parser.add_argument(
+        "--gemini-log-path",
+        help="Path to Gemini telemetry log or directory (overrides TOKENPRINT_GEMINI_TELEMETRY_LOG_PATH)",
+    )
+    parser.add_argument("--timezone", default="UTC", help="Timezone for date filtering (IANA timezone)")
+    parser.add_argument("--output-format", choices=["html", "json"], default="html", help="Output format: html or json")
+    parser.add_argument("--check", action="store_true", help="Run preflight checks and exit")
     args = parser.parse_args()
+    if args.output is not None:
+        args.output = args.output.strip() or None
+    if args.refresh_endpoint is not None:
+        args.refresh_endpoint = args.refresh_endpoint.strip() or "/api/refresh"
+    if args.refresh_token is not None:
+        args.refresh_token = args.refresh_token.strip()
+    if args.gemini_log_path is not None:
+        args.gemini_log_path = args.gemini_log_path.strip() or None
+    try:
+        timezone_name = _normalize_timezone_name(args.timezone)
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    # Validate date arguments (syntax + calendar validity)
+    if args.check:
+        if not _run_cli_check():
+            sys.exit(1)
+        return
+
+    # Validate date arguments (syntax + calendar validity), and ensure ranges are ordered.
+    parsed_since = None
+    parsed_until = None
     for name, val in [("since", args.since), ("until", args.until)]:
-        if val:
-            if not re.match(r"^\d{8}$", val):
-                parser.error(f"--{name} must be YYYYMMDD format (got: {val})")
-            try:
-                datetime.strptime(val, "%Y%m%d")
-            except ValueError:
-                parser.error(f"--{name} is not a valid date (got: {val})")
+        parsed = _normalize_cli_date_arg(val)
+        if val and not parsed:
+            parser.error(f"--{name} must be YYYYMMDD or YYYY-MM-DD (got: {val})")
+        if name == "since" and parsed:
+            parsed_since = parsed
+        elif name == "until" and parsed:
+            parsed_until = parsed
+
+    if parsed_since and parsed_until:
+        parsed_since_date = datetime.strptime(parsed_since, "%Y%m%d").date()
+        parsed_until_date = datetime.strptime(parsed_until, "%Y%m%d").date()
+        if parsed_since_date > parsed_until_date:
+            parser.error("--since must be before or equal to --until")
 
     try:
-        merged = _collect_merged_usage_data(args.since, args.until, args.no_cache)
+        cache_path = _resolve_cache_path(args.cache_path)
+        merged = _collect_merged_usage_data(
+            parsed_since,
+            parsed_until,
+            args.no_cache,
+            cache_path=cache_path,
+            timezone_name=timezone_name,
+            gemini_log_path=args.gemini_log_path,
+        )
     except RuntimeError:
         print("\nNo usage data found from any source.", file=sys.stderr)
         print("Make sure ccusage is installed: npm i -g ccusage", file=sys.stderr)
@@ -771,12 +1262,21 @@ def main() -> None:
         refresh_endpoint=args.refresh_endpoint if args.live_mode else "",
         refresh_token=args.refresh_token if args.live_mode else "",
     )
-    html = _render_html_from_config(config)
-    output_path = args.output or _default_output_path()
-    _write_html_file(output_path, html)
+    output_path = args.output or (
+        _default_output_path() if args.output_format == "html" else _default_output_path_json()
+    )
+    try:
+        if args.output_format == "json":
+            _write_json_file(output_path, config)
+        else:
+            html = _render_html_from_config(config)
+            _write_html_file(output_path, html)
+    except RuntimeError as exc:
+        print(f"\n{exc}", file=sys.stderr)
+        sys.exit(1)
     print(f"Dashboard written to: {output_path}")
 
-    if not args.no_open:
+    if args.output_format == "html" and not args.no_open:
         webbrowser.open(f"file://{os.path.abspath(output_path)}")
         print("Opened in browser.")
 
