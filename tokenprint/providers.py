@@ -61,27 +61,39 @@ _PROVIDER_NAME_SET: frozenset[str] = frozenset(_PROVIDER_BY_NAME)
 _PROVIDER_BY_KEY: dict[str, ProviderConfig] = {provider.key: provider for provider in PROVIDERS}
 
 
+def _normalize_provider_identifier(identifier: str) -> str | None:
+    """Normalize a provider identifier into canonical lookup form."""
+    normalized = identifier.strip().lower()
+    if not normalized:
+        return None
+    return normalized
+
+
 def provider_by_name(name: str) -> ProviderConfig | None:
     """Return provider configuration by internal name."""
-    return _PROVIDER_BY_NAME.get(name)
+    normalized = _normalize_provider_identifier(name)
+    if normalized is None:
+        return None
+    return _PROVIDER_BY_NAME.get(normalized)
 
 
 def provider_by_key(key: str) -> ProviderConfig | None:
     """Return provider configuration by output key."""
-    return _PROVIDER_BY_KEY.get(key)
+    normalized = _normalize_provider_identifier(key)
+    if normalized is None:
+        return None
+    return _PROVIDER_BY_KEY.get(normalized)
 
 
 def resolve_provider(identifier: str) -> ProviderConfig | None:
     """Resolve provider config by internal name or compact key."""
-    if not identifier:
+    normalized = _normalize_provider_identifier(identifier)
+    if normalized is None:
         return None
-    identifier = identifier.strip().lower()
-    if not identifier:
-        return None
-    by_name = provider_by_name(identifier)
+    by_name = provider_by_name(normalized)
     if by_name is not None:
         return by_name
-    return provider_by_key(identifier)
+    return provider_by_key(normalized)
 
 
 def provider_name_set() -> set[str]:

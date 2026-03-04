@@ -2971,6 +2971,13 @@ class TestProviderRegistry:
         assert p is MODULE_PROVIDERS[0]
         assert provider_by_name("missing-provider") is None
 
+    def test_provider_lookup_by_name_is_case_insensitive_and_trimmed(self):
+        p = provider_by_name("  Claude  ")
+        assert p is not None
+        assert p.name == "claude"
+        assert provider_by_name("codeX") is not None
+        assert provider_by_name("Gemini") is not None
+
     def test_provider_config_is_frozen(self):
         p = MODULE_PROVIDERS[0]
         with pytest.raises(AttributeError):
@@ -2987,6 +2994,11 @@ class TestProviderRegistry:
         assert p is not None
         assert p.name == "claude"
         assert provider_by_key("z") is None
+
+    def test_provider_lookup_by_key_is_case_insensitive_and_trimmed(self):
+        p = provider_by_key("  X  ")
+        assert p is not None
+        assert p.name == "codex"
 
     def test_resolve_provider_with_name(self):
         p = resolve_provider("claude")
