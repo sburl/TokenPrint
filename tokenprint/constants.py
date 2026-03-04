@@ -44,11 +44,11 @@ CODEX_RATE_CACHED_PER_TOKEN = 0.17e-6
 ENERGY_PER_OUTPUT_TOKEN_WH = 0.001
 ENERGY_PER_INPUT_TOKEN_WH = 0.0002
 ENERGY_PER_CACHED_TOKEN_WH = 0.00005
-PUE = 1.2                    # Power Usage Effectiveness (data center overhead)
+PUE = 1.2  # Power Usage Effectiveness (data center overhead)
 EMBODIED_CARBON_FACTOR = 1.2  # +20% for hardware manufacturing
-GRID_LOSS_FACTOR = 1.05       # 5% transmission losses (EIA)
-CARBON_INTENSITY = 390        # gCO2e per kWh (US average)
-WATER_USE_EFFICIENCY = 0.5    # liters per kWh
+GRID_LOSS_FACTOR = 1.05  # 5% transmission losses (EIA)
+CARBON_INTENSITY = 390  # gCO2e per kWh (US average)
+WATER_USE_EFFICIENCY = 0.5  # liters per kWh
 ELECTRICITY_COST_KWH = 0.13  # USD per kWh (EIA commercial average)
 
 PROVIDER_CACHE_SCHEMA_VERSION = 2

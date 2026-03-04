@@ -17,12 +17,12 @@ from tokenprint.constants import (
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    name: str           # "claude" — internal key
-    display_name: str   # "Claude Code" — shown in UI
-    key: str            # "c" — compact key in raw data JSON
-    color: str          # "#6366f1" — chart/legend color
-    collect_fn: str     # "collect_claude_data" — function name (string for mockability)
-    label: str          # "Claude Code (ccusage)" — status message during collection
+    name: str  # "claude" — internal key
+    display_name: str  # "Claude Code" — shown in UI
+    key: str  # "c" — compact key in raw data JSON
+    color: str  # "#6366f1" — chart/legend color
+    collect_fn: str  # "collect_claude_data" — function name (string for mockability)
+    label: str  # "Claude Code (ccusage)" — status message during collection
     rates: tuple[float, float, float]  # (input, output, cached) per-token USD rates
 
 

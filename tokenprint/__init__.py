@@ -14,18 +14,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from contextlib import suppress
 import json
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
-import os
 import math
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import webbrowser
 from collections import defaultdict
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -49,22 +50,31 @@ from tokenprint.constants import (
     GEMINI_RATE_CACHED_PER_TOKEN,
     GEMINI_RATE_INPUT_PER_TOKEN,
     GEMINI_RATE_OUTPUT_PER_TOKEN,
+    GEMINI_TELEMETRY_LOG_PATH_ENV_VAR,
     GRID_LOSS_FACTOR,
-    PUE,
     PROVIDER_CACHE_FILENAME,
     PROVIDER_CACHE_SCHEMA_VERSION,
+    PUE,
     TOKENPRINT_CACHE_PATH_ENV_VAR,
-    GEMINI_TELEMETRY_LOG_PATH_ENV_VAR,
     WATER_USE_EFFICIENCY,
 )
 from tokenprint.providers import (
-    ProviderConfig,
     PROVIDERS,
+    ProviderConfig,
     provider_name_set,
     provider_names,
     resolve_provider,
 )
 
+# Keep legacy rate constants on the module surface for existing imports/tests.
+_REEXPORTED_RATE_CONSTANTS = (
+    CLAUDE_RATE_CACHED_PER_TOKEN,
+    CLAUDE_RATE_INPUT_PER_TOKEN,
+    CLAUDE_RATE_OUTPUT_PER_TOKEN,
+    CODEX_RATE_CACHED_PER_TOKEN,
+    CODEX_RATE_INPUT_PER_TOKEN,
+    CODEX_RATE_OUTPUT_PER_TOKEN,
+)
 
 
 def _tokenprint_version() -> str:
@@ -76,6 +86,7 @@ def _tokenprint_version() -> str:
     except Exception:
         return "0.0.0"
 
+
 # Claude pricing fallback for models that may appear unpriced in ccusage output.
 # Source: https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-02-20).
 
@@ -83,9 +94,7 @@ def _tokenprint_version() -> str:
 def run_command(cmd: list[str], timeout: int = 60) -> str | None:
     """Run a command (list of args) and return stdout, or None on failure."""
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode == 0:
             return result.stdout.strip()
         return None
@@ -266,8 +275,11 @@ def collect_claude_data(since: str | None = None, until: str | None = None) -> d
         if date not in daily:
             daily[date] = {
                 "provider": "claude",
-                "input_tokens": 0, "output_tokens": 0,
-                "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost": 0,
             }
         daily[date]["input_tokens"] += _safe_int(entry.get("inputTokens", 0))
         daily[date]["output_tokens"] += _safe_int(entry.get("outputTokens", 0))
@@ -289,7 +301,7 @@ def _parse_date_flexible(date_str: str | None) -> str | None:
     if not date_str:
         return None
     # Try ISO format first (validate calendar correctness)
-    if len(date_str) >= 10 and date_str[4] == '-':
+    if len(date_str) >= 10 and date_str[4] == "-":
         candidate = date_str[:10]
         try:
             datetime.strptime(candidate, "%Y-%m-%d")
@@ -433,9 +445,7 @@ def _normalize_gemini_attributes(raw_attrs: Any) -> dict[str, Any] | None:
             continue
         val = item.get("Value", item.get("value", 0))
         if isinstance(val, dict):
-            val = (
-                val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
-            )
+            val = val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
         attrs[key] = val
     return attrs
 
@@ -508,8 +518,11 @@ def collect_codex_data(since: str | None = None, until: str | None = None) -> di
         if date not in daily:
             daily[date] = {
                 "provider": "codex",
-                "input_tokens": 0, "output_tokens": 0,
-                "cache_read_tokens": 0, "cache_write_tokens": 0, "cost": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost": 0,
             }
         daily[date]["input_tokens"] += input_tok
         daily[date]["output_tokens"] += output_tok
@@ -529,21 +542,22 @@ def collect_gemini_data(
     """Collect Gemini CLI usage from OpenTelemetry log."""
     if log_path is not None and gemini_log_path is None:
         gemini_log_path = log_path
-    if gemini_log_path is None:
-        log_path = _resolve_gemini_log_path()
-    else:
-        log_path = _resolve_gemini_log_path(gemini_log_path)
+    log_path = _resolve_gemini_log_path() if gemini_log_path is None else _resolve_gemini_log_path(gemini_log_path)
     if not log_path.exists():
         _warn(f"Gemini telemetry log not found: {log_path}")
         _warn("       Run: bash install.sh (or bash setup-gemini-telemetry.sh)")
         return {}
 
-    daily: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        "provider": "gemini",
-        "input_tokens": 0, "output_tokens": 0,
-        "cache_read_tokens": 0, "cache_write_tokens": 0,
-        "cost": 0,
-    })
+    daily: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "provider": "gemini",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0,
+        }
+    )
 
     try:
         with open(log_path, encoding="utf-8") as f:
@@ -579,7 +593,9 @@ def collect_gemini_data(
 
                 raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
                 output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))
-                cached_tok = _safe_int(attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0)))
+                cached_tok = _safe_int(
+                    attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0))
+                )
                 # Gemini input_token_count includes cached — subtract to get non-cached input
                 input_tok = max(0, raw_input - cached_tok)
                 has_token_fields = any(
@@ -724,10 +740,7 @@ def _migrate_provider_payload(
 def _resolve_cache_path(cache_path: str | None) -> Path | None:
     """Resolve user-provided cache path into a concrete file path."""
     normalized_cache_path = (cache_path or "").strip()
-    if normalized_cache_path:
-        resolved_path = normalized_cache_path
-    else:
-        resolved_path = os.environ.get(TOKENPRINT_CACHE_PATH_ENV_VAR, "").strip()
+    resolved_path = normalized_cache_path or os.environ.get(TOKENPRINT_CACHE_PATH_ENV_VAR, "").strip()
     if not resolved_path:
         return None
     path = Path(resolved_path).expanduser()
@@ -1013,9 +1026,14 @@ def merge_data(
                 }
             else:
                 row[name] = {
-                    "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
                     "cache_write_tokens": 0,
-                    "cost": 0, "energy_wh": 0, "carbon_g": 0, "water_ml": 0,
+                    "cost": 0,
+                    "energy_wh": 0,
+                    "carbon_g": 0,
+                    "water_ml": 0,
                 }
         merged.append(row)
     return merged
@@ -1040,7 +1058,11 @@ def compute_dashboard_data(
     # Provider data presence (for default toggle state)
     provider_has_data = {
         name: any(
-            r[name]["input_tokens"] + r[name]["output_tokens"] + r[name]["cache_read_tokens"] + r[name]["cache_write_tokens"] > 0
+            r[name]["input_tokens"]
+            + r[name]["output_tokens"]
+            + r[name]["cache_read_tokens"]
+            + r[name]["cache_write_tokens"]
+            > 0
             for r in data
         )
         for name in provider_names()
@@ -1057,8 +1079,10 @@ def compute_dashboard_data(
         for p in PROVIDERS:
             cached_tokens = r[p.name]["cache_read_tokens"] + r[p.name]["cache_write_tokens"]
             row[p.key] = [
-                r[p.name]["input_tokens"], r[p.name]["output_tokens"],
-                cached_tokens, round(r[p.name]["cost"], 4),
+                r[p.name]["input_tokens"],
+                r[p.name]["output_tokens"],
+                cached_tokens,
+                round(r[p.name]["cost"], 4),
             ]
         raw_data.append(row)
 
@@ -1067,8 +1091,13 @@ def compute_dashboard_data(
         "githubUser": github_username,
         "providerHasData": provider_has_data,
         "providers": [
-            {"name": p.name, "displayName": p.display_name, "key": p.key,
-             "color": p.color, "rates": {"input": p.rates[0], "output": p.rates[1], "cached": p.rates[2]}}
+            {
+                "name": p.name,
+                "displayName": p.display_name,
+                "key": p.key,
+                "color": p.color,
+                "rates": {"input": p.rates[0], "output": p.rates[1], "cached": p.rates[2]},
+            }
             for p in PROVIDERS
         ],
         "minDate": min_date,
@@ -1207,7 +1236,6 @@ def _collect_merged_usage_data(
     merged = merge_data(provider_data)
     print(f"\nMerged: {len(merged)} days of data", file=sys.stderr)
     return merged
-
 
 
 def main() -> None:
