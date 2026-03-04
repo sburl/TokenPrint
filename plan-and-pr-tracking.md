@@ -7,6 +7,18 @@ Date created: 2026-03-03
 
 This file tracks the full sequence of planned and executed PRs, and includes the staged roadmap requested in Step 4b.
 
+## Split PR queue from monolith (current run)
+
+The previous all-in-one PR was split into these tightly scoped PRs in this order:
+
+- [chore: sync implemented PRs and repo hardening](https://github.com/sburl/TokenPrint/pull/7) — superseded and closed
+- [docs: add architecture and planning documentation](https://github.com/sburl/TokenPrint/pull/8)
+- [ci: add GitHub Actions workflow and guardrails](https://github.com/sburl/TokenPrint/pull/9)
+- [refactor(go): simplify daemon command handling and tests](https://github.com/sburl/TokenPrint/pull/10)
+- [refactor(python): modularize tokenprint providers and CLI entrypoint](https://github.com/sburl/TokenPrint/pull/11)
+
+Current intended merge order: 8 -> 9 -> 10 -> 11.
+
 ## Operating Principles
 - Small, tightly scoped PRs.
 - No giant refactors in one PR.
@@ -221,4 +233,5 @@ For each numbered stage below, we complete:
 - Freeze with roadmap/maintenance commitments for next cycle
 
 ## Current stage status
-- **Current:** PR 117 ready -> Next PR: 118
+- **Current:** Split PR queue now active
+- **Next PR:** #11 (until completed and merged)
