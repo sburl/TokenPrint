@@ -763,8 +763,9 @@ class TestCollectGeminiData:
                 },
             }
         )
-        mock_file.return_value.__enter__ = lambda s: iter([log_line + "\n"])
+        mock_file.return_value.__enter__ = lambda s: s
         mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: log_line + "\n"
 
         result = collect_gemini_data()
         assert "2026-01-15" in result
@@ -776,8 +777,32 @@ class TestCollectGeminiData:
 
     @patch("tokenprint.Path")
     @patch("builtins.open")
-    def test_malformed_log_lines_skipped(self, mock_file, mock_path):
-        """Malformed lines should be skipped without crashing."""
+    def test_malformed_jsonl_falls_back_to_multiline(self, mock_file, mock_path):
+        """Non-JSONL content is parsed as concatenated multi-line JSON objects."""
+        mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
+        mock_path.__truediv__ = lambda s, x: mock_path
+        mock_path.exists.return_value = True
+
+        # Pretty-printed JSON (not valid JSONL)
+        content = json.dumps(
+            {
+                "timestamp": "2026-01-15T10:00:00Z",
+                "attributes": {"input_token_count": 500, "output_token_count": 200, "cached_content_token_count": 0},
+            },
+            indent=2,
+        )
+        mock_file.return_value.__enter__ = lambda s: s
+        mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: content
+
+        result = collect_gemini_data()
+        assert "2026-01-15" in result
+        assert result["2026-01-15"]["input_tokens"] == 500
+
+    @patch("tokenprint.Path")
+    @patch("builtins.open")
+    def test_malformed_records_skipped(self, mock_file, mock_path):
+        """Records without timestamps or with non-dict attributes are skipped."""
         mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
         mock_path.__truediv__ = lambda s, x: mock_path
         mock_path.exists.return_value = True
@@ -789,13 +814,13 @@ class TestCollectGeminiData:
             }
         )
         lines = [
-            "not json at all\n",
-            '{"timestamp": "2026-01-15T10:00:00Z", "attributes": "not-a-dict"}\n',
-            '{"no_timestamp": true}\n',
-            good_line + "\n",
+            '{"timestamp": "2026-01-15T10:00:00Z", "attributes": "not-a-dict"}',
+            '{"no_timestamp": true}',
+            good_line,
         ]
-        mock_file.return_value.__enter__ = lambda s: iter(lines)
+        mock_file.return_value.__enter__ = lambda s: s
         mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: "\n".join(lines) + "\n"
 
         result = collect_gemini_data()
         assert "2026-01-15" in result
@@ -818,8 +843,9 @@ class TestCollectGeminiData:
                 },
             }
         )
-        mock_file.return_value.__enter__ = lambda s: iter([log_line + "\n"])
+        mock_file.return_value.__enter__ = lambda s: s
         mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: log_line + "\n"
 
         result = collect_gemini_data()
         assert result["2026-01-15"]["input_tokens"] == 0
@@ -839,11 +865,42 @@ class TestCollectGeminiData:
                 "attributes": {"input_token_count": 100, "output_token_count": 50, "cached_content_token_count": 10},
             }
         )
-        mock_file.return_value.__enter__ = lambda s: iter([log_line + "\n"])
+        mock_file.return_value.__enter__ = lambda s: s
         mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: log_line + "\n"
 
         result = collect_gemini_data()
         assert "2025-01-15" in result
+
+    @patch("tokenprint.Path")
+    @patch("builtins.open")
+    def test_hrtime_epoch_format(self, mock_file, mock_path):
+        """Newer Gemini telemetry uses hrTime: [epoch_seconds, nanoseconds]."""
+        mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
+        mock_path.__truediv__ = lambda s, x: mock_path
+        mock_path.exists.return_value = True
+
+        # 2026-01-15 ~10:00 UTC as epoch seconds
+        content = json.dumps(
+            {
+                "hrTime": [1768507200, 456000000],
+                "attributes": {
+                    "input_token_count": 900,
+                    "output_token_count": 75,
+                    "cached_content_token_count": 0,
+                },
+            },
+            indent=2,
+        )
+        mock_file.return_value.__enter__ = lambda s: s
+        mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: content
+
+        result = collect_gemini_data()
+        assert len(result) == 1
+        date = list(result.keys())[0]
+        assert result[date]["input_tokens"] == 900
+        assert result[date]["output_tokens"] == 75
 
 
 # --- _collect_provider_data_incremental ---
