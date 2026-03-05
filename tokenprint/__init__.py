@@ -439,9 +439,7 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
 
             raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
             output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))
-            cached_tok = _safe_int(
-                attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0))
-            )
+            cached_tok = _safe_int(attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0)))
             # Gemini input_token_count includes cached — subtract to get non-cached input
             input_tok = max(0, raw_input - cached_tok)
 
