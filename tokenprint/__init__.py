@@ -367,56 +367,88 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
 
     try:
         with open(log_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
+            content = f.read()
+
+        records: list[Any] = []
+        # Try JSONL first (one JSON object per line — older format)
+        jsonl_ok = True
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                jsonl_ok = False
+                break
+
+        if not jsonl_ok:
+            # Concatenated multi-line JSON objects (newer format)
+            records = []
+            decoder = json.JSONDecoder()
+            pos = 0
+            while pos < len(content):
+                while pos < len(content) and content[pos] in " \t\n\r":
+                    pos += 1
+                if pos >= len(content):
+                    break
                 try:
-                    record = json.loads(line)
+                    obj, end = decoder.raw_decode(content, pos)
+                    records.append(obj)
+                    pos = end
                 except json.JSONDecodeError:
-                    continue
+                    pos += 1
 
-                # Extract timestamp for date grouping
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+
+            # Extract timestamp — try hrTime first (newer format),
+            # then fall back to timestamp/time fields (older format)
+            hr_time = record.get("hrTime")
+            if isinstance(hr_time, list) and hr_time:
+                ts = hr_time[0]
+            else:
                 ts = record.get("timestamp") or record.get("time") or record.get("Timestamp")
-                date = _date_from_timestamp_like(ts)
-                if not date:
-                    continue
+            date = _date_from_timestamp_like(ts)
+            if not date:
+                continue
 
-                # Apply date filters
-                date_compact = date.replace("-", "")
-                if since and date_compact < since:
-                    continue
-                if until and date_compact > until:
-                    continue
+            # Apply date filters
+            date_compact = date.replace("-", "")
+            if since and date_compact < since:
+                continue
+            if until and date_compact > until:
+                continue
 
-                # Look for token usage in attributes or body
-                attrs = record.get("attributes", record.get("Attributes", {}))
-                if isinstance(attrs, list):
-                    attrs_dict: dict[str, Any] = {}
-                    for a in attrs:
-                        if not isinstance(a, dict):
-                            continue
-                        key = a.get("Key", a.get("key", ""))
-                        val = a.get("Value", a.get("value", {}))
-                        if isinstance(val, dict):
-                            val = val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
-                        attrs_dict[key] = val
-                    attrs = attrs_dict
-                if not isinstance(attrs, dict):
-                    continue
+            # Look for token usage in attributes or body
+            attrs = record.get("attributes", record.get("Attributes", {}))
+            if isinstance(attrs, list):
+                attrs_dict: dict[str, Any] = {}
+                for a in attrs:
+                    if not isinstance(a, dict):
+                        continue
+                    key = a.get("Key", a.get("key", ""))
+                    val = a.get("Value", a.get("value", {}))
+                    if isinstance(val, dict):
+                        val = val.get("intValue", val.get("Int64Value", val.get("stringValue", 0)))
+                    attrs_dict[key] = val
+                attrs = attrs_dict
+            if not isinstance(attrs, dict):
+                continue
 
-                raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
-                output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))
-                cached_tok = _safe_int(
-                    attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0))
-                )
-                # Gemini input_token_count includes cached — subtract to get non-cached input
-                input_tok = max(0, raw_input - cached_tok)
+            raw_input = _safe_int(attrs.get("input_token_count", attrs.get("gen_ai.usage.input_tokens", 0)))
+            output_tok = _safe_int(attrs.get("output_token_count", attrs.get("gen_ai.usage.output_tokens", 0)))
+            cached_tok = _safe_int(
+                attrs.get("cached_content_token_count", attrs.get("gen_ai.usage.cached_tokens", 0))
+            )
+            # Gemini input_token_count includes cached — subtract to get non-cached input
+            input_tok = max(0, raw_input - cached_tok)
 
-                if input_tok or output_tok or cached_tok:
-                    daily[date]["input_tokens"] += input_tok
-                    daily[date]["output_tokens"] += output_tok
-                    daily[date]["cache_read_tokens"] += cached_tok
+            if input_tok or output_tok or cached_tok:
+                daily[date]["input_tokens"] += input_tok
+                daily[date]["output_tokens"] += output_tok
+                daily[date]["cache_read_tokens"] += cached_tok
     except (OSError, PermissionError):
         print("  [skip] Could not read Gemini telemetry log (permission or I/O error)", file=sys.stderr)
         return {}
