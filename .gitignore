@@ -9,3 +9,4 @@ htmlcov/
 dist/
 build/
 .ruff_cache/
+.aider*
