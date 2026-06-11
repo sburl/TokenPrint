@@ -230,6 +230,48 @@ func TestRefreshHandlerBlocksCrossOrigin(t *testing.T) {
 	}
 }
 
+func TestIndexHandlerRequiresTokenWhenConfigured(t *testing.T) {
+	// Regression: when a RefreshToken is set the dashboard HTML must also be
+	// protected. Previously indexHandler served the HTML to any caller regardless
+	// of whether a token was configured, allowing unauthenticated access to the
+	// dashboard on non-loopback deployments.
+	outputPath := filepath.Join(t.TempDir(), "tokenprint.html")
+	if err := os.WriteFile(outputPath, []byte("<html>secret</html>"), 0o644); err != nil {
+		t.Fatalf("write output file: %v", err)
+	}
+
+	app := newApp(Config{OutputPath: outputPath, RefreshToken: "secret"}, func(context.Context) error { return nil })
+	handler := app.handler()
+
+	// Unauthenticated GET → 401.
+	unauthStatus, unauthBody, _ := performRequest(t, handler, http.MethodGet, "/", "")
+	if unauthStatus != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated dashboard GET, got %d body=%s", unauthStatus, unauthBody)
+	}
+
+	// Wrong token → 401.
+	wrongStatus, wrongBody, _ := performRequest(t, handler, http.MethodGet, "/", "wrong")
+	if wrongStatus != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for wrong token on dashboard GET, got %d body=%s", wrongStatus, wrongBody)
+	}
+
+	// Correct token → 200 with HTML content.
+	authStatus, authBody, authHeaders := performRequest(t, handler, http.MethodGet, "/", "secret")
+	if authStatus != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated dashboard GET, got %d body=%s", authStatus, authBody)
+	}
+	if !strings.Contains(authHeaders.Get("Content-Type"), "text/html") {
+		t.Fatalf("expected html content-type, got %q", authHeaders.Get("Content-Type"))
+	}
+
+	// No token configured → 200 (loopback / open deployments unaffected).
+	openApp := newApp(Config{OutputPath: outputPath}, func(context.Context) error { return nil })
+	openStatus, _, _ := performRequest(t, openApp.handler(), http.MethodGet, "/", "")
+	if openStatus != http.StatusOK {
+		t.Fatalf("expected 200 when no token configured, got %d", openStatus)
+	}
+}
+
 func performRequest(t *testing.T, handler http.Handler, method string, path string, token string) (int, string, http.Header) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)

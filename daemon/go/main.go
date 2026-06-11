@@ -226,6 +226,13 @@ func (a *App) indexHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method_not_allowed"})
 		return
 	}
+	if a.cfg.RefreshToken != "" {
+		tok := r.Header.Get("X-Tokenprint-Token")
+		if !secureTokenEqual(tok, a.cfg.RefreshToken) {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
+			return
+		}
+	}
 	f, err := os.Open(a.cfg.OutputPath)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "dashboard_not_found"})
