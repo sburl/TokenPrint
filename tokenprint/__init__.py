@@ -394,10 +394,15 @@ def collect_gemini_data(since: str | None = None, until: str | None = None) -> d
                     break
                 try:
                     obj, end = decoder.raw_decode(content, pos)
-                    records.append(obj)
+                    if isinstance(obj, dict):
+                        records.append(obj)
                     pos = end
                 except json.JSONDecodeError:
-                    pos += 1
+                    # Skip to the next top-level '{' rather than advancing
+                    # one byte at a time — prevents spurious partial matches
+                    # from inside a malformed object being decoded as records.
+                    next_brace = content.find("\n{", pos)
+                    pos = next_brace + 1 if next_brace != -1 else len(content)
 
         for record in records:
             if not isinstance(record, dict):

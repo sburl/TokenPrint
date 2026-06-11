@@ -902,6 +902,50 @@ class TestCollectGeminiData:
         assert result[date]["input_tokens"] == 900
         assert result[date]["output_tokens"] == 75
 
+    @patch("tokenprint.Path")
+    @patch("builtins.open")
+    def test_malformed_first_object_does_not_produce_spurious_records(self, mock_file, mock_path):
+        """A broken first JSON object must not leak inner string/dict fragments as records.
+
+        Regression for the raw_decode pos+=1 bug: advancing one byte at a time through
+        a malformed object causes quoted strings and nested dicts inside it to be decoded
+        as top-level records. The fix skips forward to the next '{' at line-start instead.
+        """
+        mock_path.home.return_value.__truediv__ = lambda s, x: mock_path
+        mock_path.__truediv__ = lambda s, x: mock_path
+        mock_path.exists.return_value = True
+
+        # First object is broken (BROKEN_TOKEN is not valid JSON).
+        # Second object is valid and should be the only result.
+        broken_first = (
+            '{\n'
+            '  "timestamp": "2026-01-15T10:00:00Z",\n'
+            '  "attributes": {"input_token_count": BROKEN_TOKEN}\n'
+            '}\n'
+        )
+        valid_second = json.dumps(
+            {
+                "timestamp": "2026-01-16T10:00:00Z",
+                "attributes": {
+                    "input_token_count": 300,
+                    "output_token_count": 150,
+                    "cached_content_token_count": 0,
+                },
+            },
+            indent=2,
+        )
+        content = broken_first + valid_second
+
+        mock_file.return_value.__enter__ = lambda s: s
+        mock_file.return_value.__exit__ = lambda s, *a: None
+        mock_file.return_value.read = lambda: content
+
+        result = collect_gemini_data()
+        # Only the valid second record should appear; the broken first must produce nothing.
+        assert list(result.keys()) == ["2026-01-16"], f"unexpected keys: {list(result.keys())}"
+        assert result["2026-01-16"]["input_tokens"] == 300
+        assert result["2026-01-16"]["output_tokens"] == 150
+
 
 # --- _collect_provider_data_incremental ---
 
