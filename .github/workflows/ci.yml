@@ -38,14 +38,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: Shell script syntax checks
-        run: ./.github/scripts/ci-shell-syntax-check.sh
-      - name: Ruff lint
-        run: |
-          ruff check .
-          ruff format --check .
-      - name: Python unit tests
-        run: pytest -q
+      # Read-only checks: syntax check only runs `bash -n` on tracked .sh files, ruff only reads
+      # sources, and pytest writes only to temp dirs (plus caches ruff excludes). No shared state.
+      - parallel:
+          - name: Shell script syntax checks
+            run: ./.github/scripts/ci-shell-syntax-check.sh
+          - name: Ruff lint
+            run: |
+              ruff check .
+              ruff format --check .
+          - name: Python unit tests
+            run: pytest -q
 
   go:
     name: Go unit tests
@@ -59,18 +62,21 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
-      - name: Go tests
-        working-directory: daemon/go
-        run: go test ./...
-      - name: Go quality gates
-        working-directory: daemon/go
-        run: |
-          if [ -n "$(gofmt -s -l *.go)" ]; then
-            echo "gofmt check failed for:"
-            gofmt -s -l *.go
-            exit 1
-          fi
-          go vet ./...
+      # Tests use t.TempDir/httptest only (no ports or repo writes); gofmt/vet only read sources.
+      # The shared Go build cache is safe for concurrent use.
+      - parallel:
+          - name: Go tests
+            working-directory: daemon/go
+            run: go test ./...
+          - name: Go quality gates
+            working-directory: daemon/go
+            run: |
+              if [ -n "$(gofmt -s -l *.go)" ]; then
+                echo "gofmt check failed for:"
+                gofmt -s -l *.go
+                exit 1
+              fi
+              go vet ./...
 
   nightly:
     name: Nightly extended checks
@@ -89,16 +95,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: Run full Python checks
-        run: |
-          set -o pipefail
-          ./.github/scripts/ci-shell-syntax-check.sh
-          ruff check .
-          ruff format --check .
-          pytest -q | tee pytest-output.txt
-      - name: Python dependency graph sanity
-        run: |
-          python -m pip check
+      # `pip check` only reads installed package metadata; nothing installs into the env until
+      # pip-audit, which stays sequential after this group.
+      - parallel:
+          - name: Run full Python checks
+            run: |
+              set -o pipefail
+              ./.github/scripts/ci-shell-syntax-check.sh
+              ruff check .
+              ruff format --check .
+              pytest -q | tee pytest-output.txt
+          - name: Python dependency graph sanity
+            run: |
+              python -m pip check
       - name: Python vulnerability audit
         run: |
           python -m pip install --no-input --upgrade pip-audit
@@ -108,33 +117,39 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
-      - name: Run extended Go checks
-        working-directory: daemon/go
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          if [ -n "$(gofmt -s -l *.go)" ]; then
-            echo "gofmt check failed for:"
-            gofmt -s -l *.go
-            exit 1
-          fi
-          go vet ./...
-          if ! staticcheck ./... > go-staticcheck-output.txt; then
-            cat go-staticcheck-output.txt
-            exit 1
-          fi
-          go test -race ./...
-          go test ./... > go-test-output.txt
-      - name: Go module integrity check
-        working-directory: daemon/go
-        run: go mod verify
-      - name: Go vulnerability audit
-        working-directory: daemon/go
-        run: |
-          set -o pipefail
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          go run golang.org/x/vuln/cmd/govulncheck ./... | tee go-vulncheck-output.txt
-      - name: Secret pattern scan
-        run: .github/scripts/ci-secret-scan.sh
+      # go.mod has no requirements, so `go mod verify` touches no module cache entries the
+      # staticcheck install writes. The two `go install` steps stay in separate groups.
+      - parallel:
+          - name: Run extended Go checks
+            working-directory: daemon/go
+            run: |
+              go install honnef.co/go/tools/cmd/staticcheck@latest
+              if [ -n "$(gofmt -s -l *.go)" ]; then
+                echo "gofmt check failed for:"
+                gofmt -s -l *.go
+                exit 1
+              fi
+              go vet ./...
+              if ! staticcheck ./... > go-staticcheck-output.txt; then
+                cat go-staticcheck-output.txt
+                exit 1
+              fi
+              go test -race ./...
+              go test ./... > go-test-output.txt
+          - name: Go module integrity check
+            working-directory: daemon/go
+            run: go mod verify
+      # The secret scan is a read-only ripgrep over the checkout; govulncheck only writes
+      # go-vulncheck-output.txt, which the scan already covered when it ran afterwards.
+      - parallel:
+          - name: Go vulnerability audit
+            working-directory: daemon/go
+            run: |
+              set -o pipefail
+              go install golang.org/x/vuln/cmd/govulncheck@latest
+              go run golang.org/x/vuln/cmd/govulncheck ./... | tee go-vulncheck-output.txt
+          - name: Secret pattern scan
+            run: .github/scripts/ci-secret-scan.sh
       - name: Archive nightly artifacts
         if: always()
         uses: actions/upload-artifact@v5
